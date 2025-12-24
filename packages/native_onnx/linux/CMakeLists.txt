@@ -34,6 +34,11 @@ target_include_directories(${PLUGIN_NAME} PRIVATE
 target_link_libraries(${PLUGIN_NAME} PRIVATE flutter)
 target_link_libraries(${PLUGIN_NAME} PRIVATE PkgConfig::GTK)
 
+# Find OpenCV
+pkg_check_modules(OPENCV REQUIRED opencv4)
+target_include_directories(${PLUGIN_NAME} PRIVATE ${OPENCV_INCLUDE_DIRS})
+target_link_libraries(${PLUGIN_NAME} PRIVATE ${OPENCV_LIBRARIES})
+
 # Link against ONNX Runtime
 target_link_libraries(${PLUGIN_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/libs/libonnxruntime.so")
 

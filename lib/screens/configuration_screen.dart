@@ -34,7 +34,9 @@ class ConfigurationScreen extends StatelessWidget {
                   itemCount: streamProvider.streams.length,
                   itemBuilder: (context, index) {
                     final stream = streamProvider.streams[index];
-                    final selectedModelId = inferenceProvider.getModelForStream(stream.id);
+                    final selectedModelId = inferenceProvider.getModelForStream(
+                      stream.id,
+                    );
 
                     return Padding(
                       padding: const EdgeInsets.only(bottom: 12),
@@ -44,16 +46,28 @@ class ConfigurationScreen extends StatelessWidget {
                           children: [
                             Row(
                               children: [
-                                Icon(Icons.settings_input_component, color: AppTheme.primary),
+                                Icon(
+                                  Icons.settings_input_component,
+                                  color: AppTheme.primary,
+                                ),
                                 const SizedBox(width: 12),
-                                ModernLabel(stream.name, fontWeight: FontWeight.bold),
+                                ModernLabel(
+                                  stream.name,
+                                  fontWeight: FontWeight.bold,
+                                ),
                               ],
                             ),
                             const SizedBox(height: 16),
-                            ModernLabel("Select Model:", fontSize: 12, color: AppTheme.text.withOpacity(0.7)),
+                            ModernLabel(
+                              "Select Model:",
+                              fontSize: 12,
+                              color: AppTheme.text.withOpacity(0.7),
+                            ),
                             const SizedBox(height: 8),
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 12),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                              ),
                               decoration: BoxDecoration(
                                 color: AppTheme.background,
                                 borderRadius: BorderRadius.circular(8),
@@ -61,11 +75,24 @@ class ConfigurationScreen extends StatelessWidget {
                               ),
                               child: DropdownButtonHideUnderline(
                                 child: DropdownButton<String>(
-                                  value: selectedModelId,
+                                  value:
+                                      modelProvider.models.any(
+                                        (m) => m.id == selectedModelId,
+                                      )
+                                      ? selectedModelId
+                                      : null,
                                   isExpanded: true,
                                   dropdownColor: AppTheme.surface,
-                                  hint: Text("None", style: TextStyle(color: AppTheme.text.withOpacity(0.5))),
-                                  icon: const Icon(Icons.arrow_drop_down, color: AppTheme.text),
+                                  hint: Text(
+                                    "None",
+                                    style: TextStyle(
+                                      color: AppTheme.text.withOpacity(0.5),
+                                    ),
+                                  ),
+                                  icon: const Icon(
+                                    Icons.arrow_drop_down,
+                                    color: AppTheme.text,
+                                  ),
                                   style: const TextStyle(color: AppTheme.text),
                                   items: [
                                     const DropdownMenuItem<String>(
@@ -80,8 +107,25 @@ class ConfigurationScreen extends StatelessWidget {
                                     }).toList(),
                                   ],
                                   onChanged: (value) {
-                                    final model = modelProvider.models.firstWhere((m) => m.id == value);
-                                    inferenceProvider.setModelForStream(stream.id, value, model.path);
+                                    if (value == null) {
+                                      inferenceProvider.setModelForStream(
+                                        stream.id,
+                                        null,
+                                        null,
+                                      );
+                                    } else {
+                                      try {
+                                        final model = modelProvider.models
+                                            .firstWhere((m) => m.id == value);
+                                        inferenceProvider.setModelForStream(
+                                          stream.id,
+                                          value,
+                                          model.path,
+                                        );
+                                      } catch (e) {
+                                        debugPrint("Error selecting model: $e");
+                                      }
+                                    }
                                   },
                                 ),
                               ),

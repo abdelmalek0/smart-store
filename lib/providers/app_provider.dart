@@ -2,12 +2,8 @@ import 'package:flutter/material.dart';
 
 class AppProvider extends ChangeNotifier {
   bool _isEngineRunning = false;
-  bool _isSidebarExpanded = true;
-  Map<String, double> _stats = {
-    'cpu': 0.0,
-    'gpu': 0.0,
-    'ram': 0.0,
-  };
+  bool _isSidebarExpanded = false;
+  Map<String, double> _stats = {'cpu': 0.0, 'gpu': 0.0, 'ram': 0.0};
 
   String _cpuName = "Detecting...";
   String _gpuName = "Detecting...";

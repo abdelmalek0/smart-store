@@ -11,12 +11,17 @@ import 'package:smart_store_linux/providers/model_provider.dart';
 import 'package:smart_store_linux/services/inference_service.dart';
 import 'package:smart_store_linux/providers/inference_provider.dart';
 import 'package:smart_store_linux/screens/main_layout.dart';
+import 'package:smart_store_linux/services/stream_process_manager.dart';
+import 'package:smart_store_linux/services/config_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   fvp.registerWith();
 
   await windowManager.ensureInitialized();
+
+  // Initialize Config Service
+  await ConfigService.instance.init();
 
   // Initialize Inference Service (ONNX Runtime) early to ensure Logger is registered
   await InferenceService().init();
@@ -67,7 +72,19 @@ class _VisionLabAppState extends State<VisionLabApp> {
             return provider;
           },
         ),
-        ChangeNotifierProvider(create: (_) => InferenceProvider()),
+        ChangeNotifierProxyProvider<ModelProvider, InferenceProvider>(
+          create: (_) => InferenceProvider(),
+          update: (context, modelProvider, previous) {
+            final provider = previous ?? InferenceProvider();
+            provider.setModelProvider(modelProvider);
+            // Only initialize once when both providers are ready
+            if (modelProvider.isInitialized && !provider.isInitialized) {
+              provider.initialize();
+            }
+            return provider;
+          },
+        ),
+        ChangeNotifierProvider(create: (_) => StreamProcessManager()),
       ],
       child: MaterialApp(
         title: 'Smart Store',

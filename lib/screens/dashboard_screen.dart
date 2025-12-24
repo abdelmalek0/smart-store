@@ -4,6 +4,9 @@ import 'package:smart_store_linux/theme/app_theme.dart';
 import 'package:smart_store_linux/providers/app_provider.dart';
 import 'package:smart_store_linux/providers/rtsp_stream_provider.dart';
 import 'package:smart_store_linux/widgets/modern_widgets.dart';
+import 'package:smart_store_linux/services/stream_process_manager.dart';
+import 'package:smart_store_linux/providers/inference_provider.dart';
+import 'package:smart_store_linux/providers/model_provider.dart';
 
 class DashboardScreen extends StatelessWidget {
   const DashboardScreen({super.key});
@@ -12,6 +15,11 @@ class DashboardScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final appProvider = Provider.of<AppProvider>(context);
     final streamProvider = Provider.of<RTSPStreamProvider>(context);
+    final inferenceProvider = Provider.of<InferenceProvider>(
+      context,
+      listen: false,
+    ); // Access without listen if only reading for start
+    final modelProvider = Provider.of<ModelProvider>(context, listen: false);
 
     return CustomScrollView(
       slivers: [
@@ -39,7 +47,7 @@ class DashboardScreen extends StatelessWidget {
                       "Note: Metrics are system-wide (app-specific monitoring not available)",
                       style: TextStyle(
                         fontSize: 10,
-                        color: AppTheme.text.withOpacity(0.5),
+                        color: AppTheme.text.withValues(alpha: 0.5),
                       ),
                     ),
                     const SizedBox(height: 16),
@@ -63,7 +71,7 @@ class DashboardScreen extends StatelessWidget {
                             appProvider.cpuName,
                             style: TextStyle(
                               fontSize: 12,
-                              color: AppTheme.text.withOpacity(0.8),
+                              color: AppTheme.text.withValues(alpha: 0.8),
                             ),
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -87,7 +95,7 @@ class DashboardScreen extends StatelessWidget {
                             "${appProvider.stats['ram']?.toStringAsFixed(1)} GB RAM",
                             style: TextStyle(
                               fontSize: 12,
-                              color: AppTheme.text.withOpacity(0.7),
+                              color: AppTheme.text.withValues(alpha: 0.7),
                             ),
                             textAlign: TextAlign.right,
                           ),
@@ -115,7 +123,7 @@ class DashboardScreen extends StatelessWidget {
                             appProvider.gpuName,
                             style: TextStyle(
                               fontSize: 12,
-                              color: AppTheme.text.withOpacity(0.8),
+                              color: AppTheme.text.withValues(alpha: 0.8),
                             ),
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -139,7 +147,7 @@ class DashboardScreen extends StatelessWidget {
                             "${appProvider.vramUsage.toStringAsFixed(1)} / ${appProvider.vramTotal.toStringAsFixed(1)} GB",
                             style: TextStyle(
                               fontSize: 12,
-                              color: AppTheme.text.withOpacity(0.7),
+                              color: AppTheme.text.withValues(alpha: 0.7),
                             ),
                             textAlign: TextAlign.right,
                           ),
@@ -167,16 +175,38 @@ class DashboardScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: 20),
                 ModernButton(
-                  label: appProvider.isEngineRunning ? "Stop Engine" : "Start Engine",
+                  label: appProvider.isEngineRunning
+                      ? "Stop Engine"
+                      : "Start Engine",
                   isDestructive: appProvider.isEngineRunning,
-                  onPressed: appProvider.toggleEngine,
-                  icon: appProvider.isEngineRunning ? Icons.stop : Icons.play_arrow,
+                  onPressed: () {
+                    final shouldRun = !appProvider.isEngineRunning;
+                    appProvider.toggleEngine();
+                    if (shouldRun) {
+                      StreamProcessManager.instance.startAll(
+                        streamProvider.streams,
+                        inferenceProvider.streamModelMap,
+                        modelProvider.models,
+                      );
+                    } else {
+                      StreamProcessManager.instance.stopAll();
+                    }
+                  },
+                  icon: appProvider.isEngineRunning
+                      ? Icons.stop
+                      : Icons.play_arrow,
                 ),
                 const SizedBox(height: 20),
-                Divider(color: Colors.white.withOpacity(0.1)),
+                Divider(color: Colors.white.withValues(alpha: 0.1)),
                 const SizedBox(height: 10),
-                _buildStatusRow("Active Streams", "${streamProvider.streams.length}"),
-                _buildStatusRow("Engine Status", appProvider.isEngineRunning ? "Running" : "Stopped"),
+                _buildStatusRow(
+                  "Active Streams",
+                  "${streamProvider.streams.length}",
+                ),
+                _buildStatusRow(
+                  "Engine Status",
+                  appProvider.isEngineRunning ? "Running" : "Stopped",
+                ),
               ],
             ),
           ),
@@ -185,13 +215,18 @@ class DashboardScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildStatCard(String title, String value, String subtitle, Color color) {
+  Widget _buildStatCard(
+    String title,
+    String value,
+    String subtitle,
+    Color color,
+  ) {
     return ModernCard(
       padding: const EdgeInsets.all(20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          ModernLabel(title, color: AppTheme.text.withOpacity(0.7)),
+          ModernLabel(title, color: AppTheme.text.withValues(alpha: 0.7)),
           const SizedBox(height: 10),
           Text(
             value,
@@ -206,7 +241,7 @@ class DashboardScreen extends StatelessWidget {
             subtitle,
             style: TextStyle(
               fontSize: 12,
-              color: AppTheme.text.withOpacity(0.5),
+              color: AppTheme.text.withValues(alpha: 0.5),
             ),
             overflow: TextOverflow.ellipsis,
             maxLines: 2,
@@ -223,7 +258,11 @@ class DashboardScreen extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           ModernLabel(label),
-          ModernLabel(value, fontWeight: FontWeight.bold, color: AppTheme.primary),
+          ModernLabel(
+            value,
+            fontWeight: FontWeight.bold,
+            color: AppTheme.primary,
+          ),
         ],
       ),
     );

@@ -1,184 +1,166 @@
+import 'dart:async';
+import 'dart:isolate';
 import 'dart:typed_data';
-import 'dart:io';
 import 'package:flutter/foundation.dart';
-import 'package:native_onnx/native_onnx.dart';
-import 'dart:math' as math;
+import 'package:smart_store_linux/inference/inference_result.dart';
+import 'package:smart_store_linux/inference/inference_worker.dart';
+import 'package:smart_store_linux/inference/messages.dart';
 
+/// Service for managing inference in a background isolate
+///
+/// Responsibilities:
+/// - Spawning and managing the inference worker isolate
+/// - Queuing inference requests
+/// - Broadcasting inference results
+/// - Loading models
 class InferenceService {
+  // Singleton pattern
   static final InferenceService _instance = InferenceService._internal();
   factory InferenceService() => _instance;
+  static InferenceService get instance => _instance;
   InferenceService._internal();
 
-  final Map<String, NativeOrtSession> _sessions = {};
+  final StreamController<InferenceResult> _resultStreamController =
+      StreamController<InferenceResult>.broadcast();
+  Stream<InferenceResult> get resultsStream => _resultStreamController.stream;
 
+  Isolate? _workerIsolate;
+  SendPort? _workerSendPort;
+  ReceivePort? _receivePort;
+  bool _isServiceInitialized = false;
+  Future<void>? _initFuture;
+
+  /// Initialize the inference service and spawn worker isolate
   Future<void> init() async {
-    await NativeInferenceService().init();
+    if (_isServiceInitialized) return;
+    if (_initFuture != null) return _initFuture;
+
+    _initFuture = _doInit();
+    return _initFuture;
   }
 
-  Future<void> release() async {
-    for (var s in _sessions.values) s.release();
-    _sessions.clear();
-  }
+  /// Internal initialization implementation
+  Future<void> _doInit() async {
+    debugPrint("InferenceService: Initializing Worker Isolate...");
 
-  Future<bool> loadModel(String modelPath) async {
-    if (_sessions.containsKey(modelPath)) return true;
+    _receivePort = ReceivePort();
     try {
-      // Assuming file exists or managed by caller (simplifying asset logic for now)
-      final file = File(modelPath);
-      if (!file.existsSync()) {
-        // Add simplified asset copy logic if needed, or assume caller provides valid path
-        // For now, assume path is valid for native bridge
-      }
-
-      final session = await NativeOrtSession.fromFile(file);
-      _sessions[modelPath] = session;
-      return true;
-    } catch (e) {
-      debugPrint("Load Model Failed: $e");
-      return false;
-    }
-  }
-
-  Future<List<dynamic>> runInference(
-    String modelPath,
-    Uint8List imageBytes,
-    List<int> shape,
-  ) async {
-    var session = _sessions[modelPath];
-    if (session == null) {
-      await loadModel(modelPath);
-      session = _sessions[modelPath];
-      if (session == null) return [];
-    }
-
-    try {
-      final Float32List floatList = await compute(_preprocessImage, imageBytes);
-
-      final inputTensor = NativeOrtValueTensor.createTensorWithDataList(
-        floatList,
-        [1, 3, 640, 640],
+      _workerIsolate = await Isolate.spawn(
+        inferenceWorkerEntry,
+        WorkerInit(_receivePort!.sendPort),
       );
-
-      final inputs = {'images': inputTensor};
-      final runOptions = NativeOrtRunOptions();
-
-      // NativeOrtSession.run returns List<List<dynamic>> (mimicking raw data return)
-      // [ [dataList], [dataList2] ]
-      final results = session.run(runOptions, inputs);
-
-      inputTensor.release();
-
-      if (results.isEmpty) return [];
-
-      // Post Process YOLO
-      // results[0][0] is the data list
-      final outputData = results[0][0] as List<double>;
-
-      return _postProcessYolo(outputData);
     } catch (e) {
-      debugPrint("Generic Inference error: $e");
-      return [];
+      debugPrint("Failed to spawn inference isolate: $e");
+      _initFuture = null;
+      return;
     }
-  }
 
-  static Float32List _preprocessImage(Uint8List imageBytes) {
-    final int width = 640;
-    final int height = 640;
-    final int inputChannels = 4;
-    final int outputChannels = 3;
-
-    if (imageBytes.length != width * height * inputChannels)
-      return Float32List(0);
-
-    final elementCount = outputChannels * width * height;
-    final Float32List floatList = Float32List(elementCount);
-
-    for (int c = 0; c < outputChannels; c++) {
-      for (int y = 0; y < height; y++) {
-        for (int x = 0; x < width; x++) {
-          final int srcOffset = (y * width + x) * inputChannels;
-          final int dstOffset = c * (width * height) + y * width + x;
-          floatList[dstOffset] = imageBytes[srcOffset + c] / 255.0;
+    final completer = Completer<void>();
+    _receivePort!.listen((message) {
+      if (message is SendPort) {
+        _workerSendPort = message;
+        debugPrint("InferenceService (Main): Received Worker SendPort");
+      } else if (message is WorkerReady) {
+        if (message.success) {
+          debugPrint("InferenceService (Main): Worker signal READY SUCCESS");
+          if (!completer.isCompleted) completer.complete();
+        } else {
+          debugPrint(
+            "InferenceService (Main): Worker signal READY FAILED: ${message.error}",
+          );
+          if (!completer.isCompleted)
+            completer.completeError(message.error ?? "Unknown Error");
         }
-      }
-    }
-    return floatList;
-  }
-
-  List<dynamic> _postProcessYolo(List<double> data) {
-    if (data.isEmpty) return [];
-
-    // YOLOv8 shape [1, 84, 8400] flattened
-    int rows = 84;
-    int cols = 8400;
-
-    if (data.length != rows * cols) {
-      return [];
-    }
-
-    List<List<double>> candidates = [];
-
-    for (int i = 0; i < cols; i++) {
-      double maxScore = 0;
-      int cls = -1;
-
-      for (int c = 4; c < rows; c++) {
-        int index = c * cols + i;
-        double score = data[index];
-        if (score > maxScore) {
-          maxScore = score;
-          cls = c - 4;
+      } else if (message is WorkerResponse) {
+        // Only log errors or actual detections
+        if (message.error != null) {
+          debugPrint(
+            "⚠️ InferenceService: Error for ${message.streamId}: ${message.error}",
+          );
+        } else if (message.detections.isNotEmpty) {
+          debugPrint(
+            "✓ InferenceService: ${message.streamId} -> ${message.detections.length} detections",
+          );
         }
+        _resultStreamController.add(
+          InferenceResult(
+            streamId: message.streamId,
+            requestId: message.requestId,
+            detections: message.detections,
+            modelPath: message.modelPath,
+          ),
+        );
+      } else {
+        debugPrint(
+          "InferenceService (Main): Received unknown message type: ${message.runtimeType}",
+        );
       }
+    });
 
-      if (maxScore > 0.45) {
-        double cx = data[0 * cols + i];
-        double cy = data[1 * cols + i];
-        double w = data[2 * cols + i];
-        double h = data[3 * cols + i];
-
-        double x1 = cx - w / 2;
-        double y1 = cy - h / 2;
-        double x2 = cx + w / 2;
-        double y2 = cy + h / 2;
-
-        if (x1 >= 0 &&
-            y1 >= 0 &&
-            x2 > x1 &&
-            y2 > y1 &&
-            x2 <= 640 &&
-            y2 <= 640) {
-          candidates.add([x1, y1, x2, y2, maxScore, cls.toDouble()]);
-        }
-      }
+    try {
+      // Increased timeout to 30 seconds for slow hardware/TensorRT compilation
+      await completer.future.timeout(const Duration(seconds: 30));
+      _isServiceInitialized = true;
+      debugPrint(
+        "Inference Service (Main): Worker Initialized and Fully Ready",
+      );
+    } catch (e) {
+      debugPrint("Inference Service: Initialization Failed or Timed out: $e");
+      _isServiceInitialized = false;
+      _initFuture = null; // Allow retry if it failed/timed out
+      _workerIsolate?.kill();
+      _workerIsolate = null;
+      _receivePort?.close();
+      _receivePort = null;
     }
-    return _nms(candidates);
   }
 
-  List<dynamic> _nms(List<List<double>> boxes) {
-    List<dynamic> results = [];
-    boxes.sort((a, b) => b[4].compareTo(a[4]));
-    while (boxes.isNotEmpty) {
-      var current = boxes.removeAt(0);
-      results.add(current);
-      boxes.removeWhere((other) {
-        double iou = _calculateIoU(current, other);
-        return iou > 0.45;
-      });
+  /// Enqueue a frame for inference
+  void enqueueFrame(
+    String streamId,
+    int requestId,
+    String modelPath,
+    Uint8List bytes,
+    int w,
+    int h,
+  ) {
+    if (!_isServiceInitialized || _workerSendPort == null) {
+      return;
     }
-    return results;
+    _workerSendPort!.send(
+      WorkerRequest(
+        streamId: streamId,
+        requestId: requestId,
+        modelPath: modelPath,
+        imageBytes: bytes,
+        width: w,
+        height: h,
+      ),
+    );
   }
 
-  double _calculateIoU(List<double> a, List<double> b) {
-    double xA = math.max(a[0], b[0]);
-    double yA = math.max(a[1], b[1]);
-    double xB = math.min(a[2], b[2]);
-    double yB = math.min(a[3], b[3]);
-    double interW = math.max(0, xB - xA);
-    double interH = math.max(0, yB - yA);
-    double interArea = interW * interH;
-    double boxAArea = (a[2] - a[0]) * (a[3] - a[1]);
-    double boxBArea = (b[2] - b[0]) * (b[3] - b[1]);
-    return interArea / (boxAArea + boxBArea - interArea);
+  /// Load a model (currently a no-op as models are loaded on-demand)
+  Future<void> loadModel(String modelPath) async {}
+
+  /// Release the inference service and kill worker isolate
+  Future<void> release() async {
+    debugPrint("InferenceService: Releasing worker isolate...");
+
+    // Kill the worker isolate to stop all inference threads
+    _workerIsolate?.kill(priority: Isolate.immediate);
+    _workerIsolate = null;
+
+    // Close the receive port
+    _receivePort?.close();
+    _receivePort = null;
+
+    // Reset state
+    _workerSendPort = null;
+    _isServiceInitialized = false;
+    _initFuture = null;
+
+    debugPrint(
+      "InferenceService: Worker isolate killed and resources released",
+    );
   }
 }

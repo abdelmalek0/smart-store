@@ -45,6 +45,22 @@ ONNX_BRIDGE_EXPORT int Session_Run(int64_t session_id, const char** output_names
 // Returns 0 on success
 ONNX_BRIDGE_EXPORT int Session_GetOutput(int64_t session_id, int index, float** out_data, int64_t** out_dims, int* out_rank, int64_t* out_count);
 
+// ==========================================
+// Video Capture API
+// ==========================================
+
+// Open a video stream (RTSP or File). Returns video_id > 0, or 0 on failure.
+ONNX_BRIDGE_EXPORT int64_t Video_Open(const char* url);
+
+// Release video resources
+ONNX_BRIDGE_EXPORT void Video_Release(int64_t video_id);
+
+// Get the next frame.
+// out_buffer: pointer to pixel data (RGBA)
+// width, height: output dimensions
+// Returns 0 on success
+ONNX_BRIDGE_EXPORT int Video_GetFrame(int64_t video_id, uint8_t** out_buffer, int* width, int* height);
+
 #ifdef __cplusplus
 }
 #endif

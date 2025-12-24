@@ -52,42 +52,28 @@ int64_t CreateSession(const char* model_path) {
         Ort::SessionOptions session_options;
         session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
 
-        // GPU Logic
+        // GPU Configuration - CUDA Only
         bool gpu_success = false;
-        std::string provider_name = "";
-
-        // 1. Try TensorRT
+        
         try {
-            OrtTensorRTProviderOptions trt_options;
-            trt_options.device_id = 0;
-            trt_options.trt_fp16_enable = 1;
-            trt_options.trt_max_workspace_size = 1LL << 30; 
-            session_options.AppendExecutionProvider_TensorRT(trt_options);
-            
             OrtCUDAProviderOptions cuda_options;
             cuda_options.device_id = 0;
-            session_options.AppendExecutionProvider_CUDA(cuda_options);
+            // Enable memory arena for better performance
+            cuda_options.arena_extend_strategy = 0; // kNextPowerOfTwo
+            cuda_options.gpu_mem_limit = SIZE_MAX; // No limit
+            cuda_options.cudnn_conv_algo_search = OrtCudnnConvAlgoSearchDefault;
             
+            session_options.AppendExecutionProvider_CUDA(cuda_options);
             gpu_success = true;
-            provider_name = "TensorRT";
-        } catch (...) {}
-
-        // 2. Try CUDA
-        if (!gpu_success) {
-            try {
-                OrtCUDAProviderOptions cuda_options;
-                cuda_options.device_id = 0;
-                session_options.AppendExecutionProvider_CUDA(cuda_options);
-                gpu_success = true;
-                provider_name = "CUDA";
-            } catch (...) {}
+            std::cout << "[Native] ✓ Enabled CUDA for " << model_path << std::endl;
+        } catch (const std::exception& e) {
+            std::cerr << "[Native] CUDA initialization failed: " << e.what() << std::endl;
+        } catch (...) {
+            std::cerr << "[Native] CUDA initialization failed with unknown error" << std::endl;
         }
         
         if (!gpu_success) {
-             std::cerr << "[Native] Warning: Could not enable GPU (TensorRT/CUDA). Falling back to CPU." << std::endl;
-             provider_name = "CPU";
-        } else {
-             std::cout << "[Native] Enabled " << provider_name << " for " << model_path << std::endl;
+            std::cerr << "[Native] ⚠ Falling back to CPU for " << model_path << std::endl;
         }
 
         auto ctx = std::make_shared<SessionContext>();
