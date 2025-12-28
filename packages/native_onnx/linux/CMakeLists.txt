@@ -1,6 +1,11 @@
 
 cmake_minimum_required(VERSION 3.10)
 
+# Suppress FindCUDA deprecation warning (we use it via OpenCV)
+if(POLICY CMP0146)
+  cmake_policy(SET CMP0146 OLD)
+endif()
+
 set(PROJECT_NAME "native_onnx")
 project(${PROJECT_NAME} LANGUAGES CXX)
 
@@ -34,17 +39,63 @@ target_include_directories(${PLUGIN_NAME} PRIVATE
 target_link_libraries(${PLUGIN_NAME} PRIVATE flutter)
 target_link_libraries(${PLUGIN_NAME} PRIVATE PkgConfig::GTK)
 
-# Find OpenCV
-pkg_check_modules(OPENCV REQUIRED opencv4)
-target_include_directories(${PLUGIN_NAME} PRIVATE ${OPENCV_INCLUDE_DIRS})
-target_link_libraries(${PLUGIN_NAME} PRIVATE ${OPENCV_LIBRARIES})
+# Use custom OpenCV with CUDA support
+set(OpenCV_DIR /opt/opencv-cuda/lib/cmake/opencv4)
+find_package(OpenCV REQUIRED COMPONENTS
+  core imgproc videoio dnn cudaimgproc cudawarping
+)
+
+target_include_directories(${PLUGIN_NAME} PRIVATE ${OpenCV_INCLUDE_DIRS})
+target_link_libraries(${PLUGIN_NAME} PRIVATE ${OpenCV_LIBS})
+
+# Add CUDA support flags
+target_compile_definitions(${PLUGIN_NAME} PRIVATE USE_CUDA)
+target_compile_definitions(${PLUGIN_NAME} PRIVATE HAVE_OPENCV_CUDAIMGPROC)
+
+# Add CUDA include directories and libraries
+find_package(CUDA QUIET)
+if(CUDA_FOUND)
+  target_include_directories(${PLUGIN_NAME} PRIVATE ${CUDA_INCLUDE_DIRS})
+  
+  # Link against CUDA runtime library
+  # First try to use bundled libcudart, fallback to system CUDA
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/libs/libcudart.so.12")
+    target_link_libraries(${PLUGIN_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/libs/libcudart.so.12")
+    message(STATUS "Using bundled CUDA runtime library")
+  elseif(CUDA_LIBRARIES)
+    target_link_libraries(${PLUGIN_NAME} PRIVATE ${CUDA_LIBRARIES})
+    message(STATUS "Using system CUDA runtime library: ${CUDA_LIBRARIES}")
+  endif()
+endif()
+
+# Add FFmpeg libraries for hardware video decoding (NVDEC)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(FFMPEG REQUIRED
+  libavcodec
+  libavformat
+  libavutil
+  libswscale
+)
+
+target_include_directories(${PLUGIN_NAME} PRIVATE ${FFMPEG_INCLUDE_DIRS})
+target_link_libraries(${PLUGIN_NAME} PRIVATE ${FFMPEG_LIBRARIES})
+
+message(STATUS "FFmpeg libraries found:")
+message(STATUS "  libavcodec: ${FFMPEG_libavcodec_VERSION}")
+message(STATUS "  libavformat: ${FFMPEG_libavformat_VERSION}")
+message(STATUS "  libavutil: ${FFMPEG_libavutil_VERSION}")
+message(STATUS "  libswscale: ${FFMPEG_libswscale_VERSION}")
+
+# Add compile definition to enable FFmpeg NVDEC code path
+target_compile_definitions(${PLUGIN_NAME} PRIVATE USE_FFMPEG_NVDEC)
+
 
 # Link against ONNX Runtime
 target_link_libraries(${PLUGIN_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/libs/libonnxruntime.so")
 
-# Set RPATH so the plugin can find onnxruntime in the same folder
+# Set RPATH so the plugin can find onnxruntime and OpenCV libraries
 set_target_properties(${PLUGIN_NAME} PROPERTIES
-    INSTALL_RPATH "$ORIGIN"
+    INSTALL_RPATH "$ORIGIN:/opt/opencv-cuda/lib"
     BUILD_WITH_INSTALL_RPATH TRUE
 )
 

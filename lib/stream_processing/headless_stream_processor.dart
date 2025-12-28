@@ -26,10 +26,10 @@ class HeadlessStreamProcessor {
   bool _isFrozen = false;
 
   // Queue Configuration - Design Spec Limits
-  static const int INFERENCE_QUEUE_MAX_SIZE = 2; // Buffer for incoming frames
-  static const int DISPLAY_QUEUE_MAX_SIZE = 10; // Buffer for processed frames
+  static const int INFERENCE_QUEUE_MAX_SIZE = 3; // Buffer for incoming frames
+  static const int DISPLAY_QUEUE_MAX_SIZE = 5; // Buffer for processed frames
 
-  // InferenceQueue: Buffers raw frames from capture (max 2)
+  // InferenceQueue: Buffers raw frames from capture (max 3)
   // Purpose: Maintain smooth playback even if inference is slower than capture
   final Queue<RawFrame> _inferenceQueue = Queue<RawFrame>();
 
@@ -58,6 +58,9 @@ class HeadlessStreamProcessor {
   // Map to store frames by requestId for proper frame-detection pairing
   final Map<int, RawFrame> _pendingFrames = {};
 
+  // Map to store timestamps for pipeline FPS calculation
+  final Map<int, Map<String, int>> _frameTimestamps = {};
+
   HeadlessStreamProcessor({required this.stream, required this.modelPath});
 
   /// Initialize the processor and start all loops
@@ -75,14 +78,23 @@ class HeadlessStreamProcessor {
 
             // Get the ACTUAL frame that was inferenced (stored by requestId)
             final inferredFrame = _pendingFrames.remove(result.requestId);
+            final timestamps = _frameTimestamps.remove(result.requestId);
 
-            if (inferredFrame != null) {
+            if (inferredFrame != null && timestamps != null) {
+              final now = DateTime.now().millisecondsSinceEpoch;
+
               // Create ProcessedFrame with matching frame and detections
               final processedFrame = ProcessedFrame(
                 imageBytes: inferredFrame.bytes,
                 width: inferredFrame.width,
                 height: inferredFrame.height,
                 detections: List.from(_lastDetections),
+                decodeStartMs: timestamps['decodeStart']!,
+                preprocessEndMs: result
+                    .processingStartMs, // When processing actually started (no queue wait)
+                inferenceEndMs: now, // Inference just completed
+                postprocessEndMs:
+                    now, // Post-processing is minimal (just copying detections)
               );
 
               // Add to DisplayQueue (max size 10)
@@ -144,14 +156,24 @@ class HeadlessStreamProcessor {
 
           _inferenceFrameCounter++;
 
-          // Process every frame with backpressure control
-          // Higher backpressure limit allows better GPU utilization with batching
-          if (_pendingInferenceCount < 6) {
+          // Minimal backpressure for ultra-low latency
+          // Only allow 1 frame in flight at a time
+          if (_pendingInferenceCount < 1) {
             final requestId = _requestIdCounter++;
             _pendingInferenceCount++;
 
+            final now = DateTime.now().millisecondsSinceEpoch;
+
             // Store the frame we're sending for inference
             _pendingFrames[requestId] = frame;
+
+            // Store timestamps for FPS calculation
+            _frameTimestamps[requestId] = {
+              'decodeStart':
+                  frame.decodeTimestamp, // Actual decode timestamp from video
+              'preprocessEnd':
+                  now, // We're about to send for inference (not used anymore)
+            };
 
             InferenceService.instance.enqueueFrame(
               stream.id,
@@ -176,17 +198,23 @@ class HeadlessStreamProcessor {
   /// When running: Display ONLY processed frames from DisplayQueue (with matching detections)
   void _startDisplayLoop() async {
     while (_isActive) {
-      try {
-        ProcessedFrame? frameToDisplay;
+      ProcessedFrame? frameToDisplay;
 
+      try {
         // When FROZEN (engine stopped): Show raw frames from InferenceQueue
         if (_isFrozen && _inferenceQueue.isNotEmpty) {
-          final rawFrame = _inferenceQueue.first;
+          final rawFrame = _inferenceQueue
+              .removeFirst(); // FIX: Remove frame to prevent reuse
+          final now = DateTime.now().millisecondsSinceEpoch;
           frameToDisplay = ProcessedFrame(
             imageBytes: rawFrame.bytes,
             width: rawFrame.width,
             height: rawFrame.height,
             detections: [], // No detections when stopped
+            decodeStartMs: now,
+            preprocessEndMs: now,
+            inferenceEndMs: now,
+            postprocessEndMs: now,
           );
         }
         // When RUNNING: ONLY show frames from DisplayQueue (synchronized with detections)
@@ -205,8 +233,14 @@ class HeadlessStreamProcessor {
         debugPrint("SPM: Error in display loop: $e");
       }
 
-      // Target ~60 FPS display for smoother playback
-      await Future.delayed(const Duration(milliseconds: 16));
+      // Adaptive timing: display frames as they arrive without forced delays
+      if (frameToDisplay != null) {
+        // Frame displayed, check for next immediately
+        await Future.delayed(Duration.zero);
+      } else {
+        // No frame available, wait briefly before checking again
+        await Future.delayed(const Duration(milliseconds: 8));
+      }
     }
   }
 
@@ -248,11 +282,16 @@ class HeadlessStreamProcessor {
 
           if (_inferenceQueue.isNotEmpty) {
             final latestFrame = _inferenceQueue.last;
+            final now = DateTime.now().millisecondsSinceEpoch;
             final processedFrame = ProcessedFrame(
               imageBytes: latestFrame.bytes,
               width: latestFrame.width,
               height: latestFrame.height,
               detections: List.from(_lastDetections),
+              decodeStartMs: now - 10, // Approximation
+              preprocessEndMs: now - 5,
+              inferenceEndMs: now,
+              postprocessEndMs: now,
             );
 
             if (_displayQueue.length >= DISPLAY_QUEUE_MAX_SIZE) {

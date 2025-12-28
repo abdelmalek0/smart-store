@@ -74,7 +74,8 @@ Future<void> _captureLoopAsync(IsolateInitParams params) async {
           if (w > 0 && h > 0 && dataPtr != nullptr) {
             final length = w * h * 4;
             final list = Uint8List.fromList(dataPtr.asTypedList(length));
-            params.sendPort.send(RawFrame(list, w, h));
+            final decodeTimestamp = DateTime.now().millisecondsSinceEpoch;
+            params.sendPort.send(RawFrame(list, w, h, decodeTimestamp));
           }
         } else {
           // Handle Error
@@ -94,7 +95,7 @@ Future<void> _captureLoopAsync(IsolateInitParams params) async {
                 "Native Video Error for ID $videoId: Code $resultArray (Count: $consecutiveErrors)",
               );
             }
-            await Future.delayed(const Duration(milliseconds: 10));
+            // No delay for transient errors - fail fast for low latency
           }
         }
       } catch (e) {
@@ -103,7 +104,9 @@ Future<void> _captureLoopAsync(IsolateInitParams params) async {
         await Future.delayed(const Duration(milliseconds: 50));
       }
 
-      await Future.delayed(const Duration(milliseconds: 1));
+      // No artificial delay - let NVDEC naturally throttle based on stream FPS
+      // This eliminates decode time jitter caused by forced 1ms waits
+      await Future.delayed(Duration.zero);
     }
   } catch (e) {
     debugPrint("Capture Isolate Error: $e");

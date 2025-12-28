@@ -43,6 +43,8 @@ class WorkerResponse {
   final String modelPath;
   final List<dynamic> detections;
   final String? error;
+  final int
+  processingStartMs; // When actual processing started (excludes queue wait)
 
   WorkerResponse({
     required this.streamId,
@@ -50,5 +52,6 @@ class WorkerResponse {
     required this.modelPath,
     required this.detections,
     this.error,
+    required this.processingStartMs,
   });
 }

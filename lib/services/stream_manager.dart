@@ -1,6 +1,4 @@
 import 'package:flutter/foundation.dart';
-import 'package:smart_store_linux/services/inference_service.dart';
-import 'package:smart_store_linux/services/resource_monitor.dart';
 import 'package:smart_store_linux/services/persistence_service.dart';
 
 class StreamData {
@@ -28,7 +26,7 @@ class StreamData {
 class StreamManager extends ChangeNotifier {
   final List<StreamData> _streams = [];
   final PersistenceService _persistence = PersistenceService();
-  
+
   List<StreamData> get streams => List.unmodifiable(_streams);
 
   StreamManager() {
@@ -71,12 +69,14 @@ class StreamManager extends ChangeNotifier {
       _saveStreams();
     }
   }
-  
+
   String? getModelForStream(String streamId) {
-     try {
-       return _streams.firstWhere((element) => element.id == streamId).assignedModel;
-     } catch (_) {
-       return null;
-     }
+    try {
+      return _streams
+          .firstWhere((element) => element.id == streamId)
+          .assignedModel;
+    } catch (_) {
+      return null;
+    }
   }
 }

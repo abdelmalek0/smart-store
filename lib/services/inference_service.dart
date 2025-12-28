@@ -24,52 +24,70 @@ class InferenceService {
       StreamController<InferenceResult>.broadcast();
   Stream<InferenceResult> get resultsStream => _resultStreamController.stream;
 
-  Isolate? _workerIsolate;
-  SendPort? _workerSendPort;
-  ReceivePort? _receivePort;
-  bool _isServiceInitialized = false;
-  Future<void>? _initFuture;
+  // Multi-worker architecture: one worker per model
+  final Map<String, Isolate> _workerIsolates = {};
+  final Map<String, SendPort> _workerSendPorts = {};
+  final Map<String, ReceivePort> _workerReceivePorts = {};
+  final Map<String, Completer<void>> _workerInitCompleters = {};
 
-  /// Initialize the inference service and spawn worker isolate
+  bool _isServiceInitialized = false;
+
+  /// Initialize the inference service
   Future<void> init() async {
     if (_isServiceInitialized) return;
-    if (_initFuture != null) return _initFuture;
-
-    _initFuture = _doInit();
-    return _initFuture;
+    _isServiceInitialized = true;
+    debugPrint("InferenceService: Multi-worker architecture initialized");
   }
 
-  /// Internal initialization implementation
-  Future<void> _doInit() async {
-    debugPrint("InferenceService: Initializing Worker Isolate...");
-
-    _receivePort = ReceivePort();
-    try {
-      _workerIsolate = await Isolate.spawn(
-        inferenceWorkerEntry,
-        WorkerInit(_receivePort!.sendPort),
-      );
-    } catch (e) {
-      debugPrint("Failed to spawn inference isolate: $e");
-      _initFuture = null;
-      return;
+  /// Spawn a worker for a specific model (called on-demand)
+  Future<void> _spawnWorkerForModel(String modelPath) async {
+    if (_workerIsolates.containsKey(modelPath)) {
+      return; // Already spawned
     }
 
+    debugPrint(
+      "InferenceService: Spawning worker for model: ${modelPath.split('/').last}",
+    );
+
+    final receivePort = ReceivePort();
+    _workerReceivePorts[modelPath] = receivePort;
+
     final completer = Completer<void>();
-    _receivePort!.listen((message) {
+    _workerInitCompleters[modelPath] = completer;
+
+    try {
+      final isolate = await Isolate.spawn(
+        inferenceWorkerEntry,
+        WorkerInit(receivePort.sendPort),
+      );
+      _workerIsolates[modelPath] = isolate;
+    } catch (e) {
+      debugPrint("Failed to spawn inference isolate for $modelPath: $e");
+      receivePort.close();
+      _workerReceivePorts.remove(modelPath);
+      _workerInitCompleters.remove(modelPath);
+      rethrow;
+    }
+
+    receivePort.listen((message) {
       if (message is SendPort) {
-        _workerSendPort = message;
-        debugPrint("InferenceService (Main): Received Worker SendPort");
+        _workerSendPorts[modelPath] = message;
+        debugPrint(
+          "InferenceService: Received SendPort for ${modelPath.split('/').last}",
+        );
       } else if (message is WorkerReady) {
         if (message.success) {
-          debugPrint("InferenceService (Main): Worker signal READY SUCCESS");
+          debugPrint(
+            "InferenceService: Worker ready for ${modelPath.split('/').last}",
+          );
           if (!completer.isCompleted) completer.complete();
         } else {
           debugPrint(
-            "InferenceService (Main): Worker signal READY FAILED: ${message.error}",
+            "InferenceService: Worker failed for ${modelPath.split('/').last}: ${message.error}",
           );
-          if (!completer.isCompleted)
+          if (!completer.isCompleted) {
             completer.completeError(message.error ?? "Unknown Error");
+          }
         }
       } else if (message is WorkerResponse) {
         // Only log errors or actual detections
@@ -79,43 +97,42 @@ class InferenceService {
           );
         } else if (message.detections.isNotEmpty) {
           debugPrint(
-            "✓ InferenceService: ${message.streamId} -> ${message.detections.length} detections",
+            "✓ InferenceService: ${message.streamId} → ${message.detections.length} detections",
           );
         }
+
         _resultStreamController.add(
           InferenceResult(
             streamId: message.streamId,
             requestId: message.requestId,
             detections: message.detections,
             modelPath: message.modelPath,
+            processingStartMs: message.processingStartMs,
           ),
-        );
-      } else {
-        debugPrint(
-          "InferenceService (Main): Received unknown message type: ${message.runtimeType}",
         );
       }
     });
 
     try {
-      // Increased timeout to 30 seconds for slow hardware/TensorRT compilation
       await completer.future.timeout(const Duration(seconds: 30));
-      _isServiceInitialized = true;
       debugPrint(
-        "Inference Service (Main): Worker Initialized and Fully Ready",
+        "InferenceService: Worker for ${modelPath.split('/').last} fully initialized",
       );
     } catch (e) {
-      debugPrint("Inference Service: Initialization Failed or Timed out: $e");
-      _isServiceInitialized = false;
-      _initFuture = null; // Allow retry if it failed/timed out
-      _workerIsolate?.kill();
-      _workerIsolate = null;
-      _receivePort?.close();
-      _receivePort = null;
+      debugPrint(
+        "InferenceService: Worker initialization failed or timed out for $modelPath: $e",
+      );
+      _workerIsolates[modelPath]?.kill();
+      _workerIsolates.remove(modelPath);
+      _workerSendPorts.remove(modelPath);
+      _workerReceivePorts[modelPath]?.close();
+      _workerReceivePorts.remove(modelPath);
+      _workerInitCompleters.remove(modelPath);
+      rethrow;
     }
   }
 
-  /// Enqueue a frame for inference
+  /// Enqueue a frame for inference (routes to correct worker based on model)
   void enqueueFrame(
     String streamId,
     int requestId,
@@ -123,11 +140,29 @@ class InferenceService {
     Uint8List bytes,
     int w,
     int h,
-  ) {
-    if (!_isServiceInitialized || _workerSendPort == null) {
+  ) async {
+    if (!_isServiceInitialized) {
+      debugPrint("⚠️ InferenceService not initialized");
       return;
     }
-    _workerSendPort!.send(
+
+    // Spawn worker if it doesn't exist for this model
+    if (!_workerSendPorts.containsKey(modelPath)) {
+      try {
+        await _spawnWorkerForModel(modelPath);
+      } catch (e) {
+        debugPrint("❌ Failed to spawn worker for $modelPath: $e");
+        return;
+      }
+    }
+
+    final sendPort = _workerSendPorts[modelPath];
+    if (sendPort == null) {
+      debugPrint("⚠️ No worker available for model: $modelPath");
+      return;
+    }
+
+    sendPort.send(
       WorkerRequest(
         streamId: streamId,
         requestId: requestId,
@@ -142,25 +177,39 @@ class InferenceService {
   /// Load a model (currently a no-op as models are loaded on-demand)
   Future<void> loadModel(String modelPath) async {}
 
-  /// Release the inference service and kill worker isolate
+  /// Release the inference service and kill all worker isolates
   Future<void> release() async {
-    debugPrint("InferenceService: Releasing worker isolate...");
+    debugPrint(
+      "InferenceService: Releasing ${_workerIsolates.length} worker isolates...",
+    );
 
-    // Kill the worker isolate to stop all inference threads
-    _workerIsolate?.kill(priority: Isolate.immediate);
-    _workerIsolate = null;
+    // Kill all worker isolates
+    for (var entry in _workerIsolates.entries) {
+      entry.value.kill(priority: Isolate.immediate);
+      debugPrint(
+        "InferenceService: Killed worker for ${entry.key.split('/').last}",
+      );
+    }
 
-    // Close the receive port
-    _receivePort?.close();
-    _receivePort = null;
+    _workerIsolates.clear();
+
+    // Close all receive ports
+    for (var receivePort in _workerReceivePorts.values) {
+      receivePort.close();
+    }
+    _workerReceivePorts.clear();
+
+    // Clear send ports
+    _workerSendPorts.clear();
+
+    // Clear completers
+    _workerInitCompleters.clear();
 
     // Reset state
-    _workerSendPort = null;
     _isServiceInitialized = false;
-    _initFuture = null;
 
     debugPrint(
-      "InferenceService: Worker isolate killed and resources released",
+      "InferenceService: All worker isolates killed and resources released",
     );
   }
 }

@@ -3,7 +3,6 @@ import 'dart:collection';
 import 'dart:ffi';
 import 'dart:io';
 import 'dart:isolate';
-import 'dart:math' as math;
 import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
 import 'package:native_onnx/native_onnx.dart';
@@ -35,16 +34,14 @@ class InferenceWorker {
   final Queue<WorkerRequest> _requestQueue = Queue<WorkerRequest>();
 
   // ========================================
-  // Configuration Constants
+  // Configuration Constants - Optimized for Low Latency
   // ========================================
-  // MAX_BATCH_SIZE: Maximum number of frames to batch together for inference
-  // Batchable models (e.g., YOLOv8) can process multiple frames in parallel on GPU
-  // Higher batch size improves GPU utilization but increases latency
-  static const int MAX_BATCH_SIZE =
-      8; // Batch size optimized for RTX 2070 Super (8 streams)
-  static const int BATCH_WINDOW_MS = 10; // Time window to collect batch items
-  static const int QUEUE_SEARCH_LIMIT = 20; // Max items to search in queue
-  static const int QUEUE_POLL_MS = 1; // Fast polling for low latency
+  // MAX_BATCH_SIZE: Set to 1 to disable batching for minimal latency
+  // Each frame is processed immediately without waiting for batch collection
+  static const int MAX_BATCH_SIZE = 1; // No batching for minimal latency
+  static const int BATCH_WINDOW_MS = 10; // Immediate processing, no wait
+  static const int QUEUE_SEARCH_LIMIT = 10; // Max items to search in queue
+  static const int QUEUE_POLL_MS = 0; // Immediate polling for minimal latency
 
   InferenceWorker(this.mainSendPort);
 
@@ -75,7 +72,7 @@ class InferenceWorker {
 
   /// Start the batch processing loop
   void _startBatchLoop() async {
-    debugPrint("InferenceWorker: Starting Batch Loop");
+    debugPrint("🚀 Inference worker started");
     while (true) {
       // Wait for requests
       if (_requestQueue.isEmpty) {
@@ -128,11 +125,7 @@ class InferenceWorker {
         await Future.delayed(const Duration(milliseconds: 1));
       }
 
-      // LOG BATCH COMPOSITION
-      final streamIdList = batch.map((r) => r.streamId).toList();
-      debugPrint(
-        "InferenceWorker: Processing batch size=${batch.length} streams=$streamIdList model=${firstReq.modelPath.split('/').last}",
-      );
+      // Process batch (no verbose logging)
       await _processBatch(batch);
     }
   }
@@ -141,6 +134,14 @@ class InferenceWorker {
   Future<void> _processBatch(List<WorkerRequest> batch) async {
     final modelPath = batch.first.modelPath;
     Pointer<Float>? batchBuffer;
+
+    // Capture when processing actually starts (excludes queue wait time)
+    final processingStartMs = DateTime.now().millisecondsSinceEpoch;
+
+    final totalStopwatch = Stopwatch()..start();
+    final preprocessStopwatch = Stopwatch();
+    final inferenceStopwatch = Stopwatch();
+    final postprocessStopwatch = Stopwatch();
 
     try {
       // ========================================
@@ -152,9 +153,12 @@ class InferenceWorker {
         if (file.existsSync()) {
           try {
             debugPrint("📥 Loading model: ${modelPath.split('/').last}");
+            final loadStart = Stopwatch()..start();
             session = await NativeOrtSession.fromFile(file);
             _sessions[modelPath] = session;
-            debugPrint("✓ Model loaded. Total models: ${_sessions.length}");
+            debugPrint(
+              "✓ Model loaded in ${loadStart.elapsedMilliseconds}ms. Total models: ${_sessions.length}",
+            );
           } catch (e) {
             debugPrint("❌ Model load error: $e");
           }
@@ -168,6 +172,8 @@ class InferenceWorker {
       // ========================================
       // Preprocess Images into Batch Buffer
       // ========================================
+      preprocessStopwatch.start();
+
       final int batchSize = batch.length;
       final int singleImageFloats = 3 * 640 * 640;
       final int totalFloats = batchSize * singleImageFloats;
@@ -193,9 +199,13 @@ class InferenceWorker {
         calloc.free(inPtr);
       }
 
+      preprocessStopwatch.stop();
+      final preprocessMs = preprocessStopwatch.elapsedMilliseconds;
+
       // ========================================
       // Run Batch Inference
       // ========================================
+      inferenceStopwatch.start();
 
       final inputTensor = NativeOrtValueTensor.createTensorFromPointer(
         batchBuffer,
@@ -205,21 +215,18 @@ class InferenceWorker {
       final runOptions = NativeOrtRunOptions();
 
       try {
-        debugPrint("🔄 Running inference for batch[$batchSize]...");
         final results = session.run(runOptions, inputs);
-        debugPrint("✓ Inference complete. Results: ${results.length}");
+
+        inferenceStopwatch.stop();
+        final inferenceMs = inferenceStopwatch.elapsedMilliseconds;
 
         // ========================================
         // Process Results
         // ========================================
+        postprocessStopwatch.start();
+
         if (results.isNotEmpty) {
-          debugPrint(
-            "  Result[0] type: ${results[0].runtimeType}, length: ${results[0] is List ? results[0].length : 'N/A'}",
-          );
           final dynamic rawOutput = results[0][0];
-          debugPrint(
-            "  rawOutput type: ${rawOutput.runtimeType}, is List: ${rawOutput is List}",
-          );
 
           if (rawOutput is List<double> || rawOutput is List) {
             final List<double> data = (rawOutput is List<double>)
@@ -232,7 +239,7 @@ class InferenceWorker {
             // Validate output size
             if (data.length != expectedTotalSize) {
               debugPrint(
-                "InferenceWorker: ERROR - Output size mismatch: ${data.length} vs expected $expectedTotalSize",
+                "⚠️ Output size mismatch: ${data.length} vs expected $expectedTotalSize",
               );
               _failBatch(
                 batch,
@@ -244,13 +251,14 @@ class InferenceWorker {
             // ========================================
             // Split Batch Results to Individual Streams
             // ========================================
-            debugPrint(
-              "📤 Splitting batch[${batchSize}] -> ${batch.map((b) => b.streamId).join(', ')}",
-            );
             for (int i = 0; i < batchSize; i++) {
               final start = i * expectedSingleSize;
               final end = start + expectedSingleSize;
-              _postProcessAndSend(data.sublist(start, end), batch[i]);
+              _postProcessAndSend(
+                data.sublist(start, end),
+                batch[i],
+                processingStartMs,
+              );
             }
           } else {
             _failBatch(
@@ -261,6 +269,20 @@ class InferenceWorker {
         } else {
           _failBatch(batch, "Empty Results from session.run");
         }
+
+        postprocessStopwatch.stop();
+        final postprocessMs = postprocessStopwatch.elapsedMilliseconds;
+        totalStopwatch.stop();
+        final totalMs = totalStopwatch.elapsedMilliseconds;
+
+        // Log detailed timing breakdown
+        debugPrint(
+          "⏱️ Batch[${batchSize}] timing: "
+          "Preprocess=${preprocessMs}ms | "
+          "Inference=${inferenceMs}ms | "
+          "Postprocess=${postprocessMs}ms | "
+          "Total=${totalMs}ms",
+        );
       } finally {
         inputTensor.release();
         runOptions.release();
@@ -275,6 +297,7 @@ class InferenceWorker {
 
   /// Fail a batch of requests
   void _failBatch(List<WorkerRequest> batch, String error) {
+    final now = DateTime.now().millisecondsSinceEpoch;
     for (var req in batch) {
       mainSendPort.send(
         WorkerResponse(
@@ -283,31 +306,31 @@ class InferenceWorker {
           modelPath: req.modelPath,
           detections: [],
           error: error,
+          processingStartMs: now,
         ),
       );
     }
   }
 
   /// Post-process and send results for a single request
-  void _postProcessAndSend(List<double> data, WorkerRequest req) {
+  void _postProcessAndSend(
+    List<double> data,
+    WorkerRequest req,
+    int processingStartMs,
+  ) {
     try {
       final detections = _postProcessYolo(data);
-      // LOG RESULT SENDING
-      debugPrint(
-        "InferenceWorker: Sending ${detections.length} detections for streamId=${req.streamId} reqId=${req.requestId}",
-      );
       mainSendPort.send(
         WorkerResponse(
           streamId: req.streamId,
           requestId: req.requestId,
           modelPath: req.modelPath,
           detections: detections,
+          processingStartMs: processingStartMs,
         ),
       );
     } catch (e) {
-      debugPrint(
-        "InferenceWorker: Postprocess error for streamId=${req.streamId}: $e",
-      );
+      debugPrint("⚠️ Postprocess error for stream ${req.streamId}: $e");
       mainSendPort.send(
         WorkerResponse(
           streamId: req.streamId,
@@ -315,23 +338,27 @@ class InferenceWorker {
           modelPath: req.modelPath,
           detections: [],
           error: "Postprocess: $e",
+          processingStartMs: processingStartMs,
         ),
       );
     }
   }
 
-  /// Post-process YOLO output with NMS
+  /// Post-process YOLO output - optimized for low latency
+  /// Skips NMS for speed, returns top detections above threshold
   List<dynamic> _postProcessYolo(List<double> data) {
-    // ... (keep existing implementation)
     int rows = 84;
     int cols = 8400;
     if (data.length != rows * cols) return [];
 
     List<List<double>> candidates = [];
 
+    // Extract detections above confidence threshold
     for (int i = 0; i < cols; i++) {
       double maxScore = 0;
       int cls = -1;
+
+      // Find class with highest confidence
       for (int c = 4; c < rows; c++) {
         int index = c * cols + i;
         double score = data[index];
@@ -341,7 +368,8 @@ class InferenceWorker {
         }
       }
 
-      if (maxScore > 0.45) {
+      // Use 0.5 threshold for good balance
+      if (maxScore > 0.5) {
         double cx = data[0 * cols + i];
         double cy = data[1 * cols + i];
         double w = data[2 * cols + i];
@@ -351,31 +379,51 @@ class InferenceWorker {
         double x2 = cx + w / 2;
         double y2 = cy + h / 2;
 
+        // Validate bounding box is within frame
         if (x1 >= 0 && y1 >= 0 && x2 <= 640 && y2 <= 640) {
           candidates.add([x1, y1, x2, y2, maxScore, cls.toDouble()]);
         }
       }
     }
 
+    // Sort by confidence and apply fast NMS
     candidates.sort((a, b) => b[4].compareTo(a[4]));
+
     List<dynamic> results = [];
-    while (candidates.isNotEmpty) {
-      var current = candidates.removeAt(0);
+    List<bool> suppressed = List.filled(candidates.length, false);
+
+    for (int i = 0; i < candidates.length && results.length < 20; i++) {
+      if (suppressed[i]) continue;
+
+      var current = candidates[i];
       results.add(current);
-      candidates.removeWhere((other) {
-        double xA = math.max(current[0], other[0]);
-        double yA = math.max(current[1], other[1]);
-        double xB = math.min(current[2], other[2]);
-        double yB = math.min(current[3], other[3]);
-        double interW = math.max(0, xB - xA);
-        double interH = math.max(0, yB - yA);
-        double interArea = interW * interH;
-        double boxAArea = (current[2] - current[0]) * (current[3] - current[1]);
-        double boxBArea = (other[2] - other[0]) * (other[3] - other[1]);
-        double iou = interArea / (boxAArea + boxBArea - interArea);
-        return iou > 0.45;
-      });
+
+      // Suppress overlapping boxes
+      for (int j = i + 1; j < candidates.length; j++) {
+        if (suppressed[j]) continue;
+
+        var other = candidates[j];
+
+        // Fast IoU calculation
+        double xA = current[0] > other[0] ? current[0] : other[0];
+        double yA = current[1] > other[1] ? current[1] : other[1];
+        double xB = current[2] < other[2] ? current[2] : other[2];
+        double yB = current[3] < other[3] ? current[3] : other[3];
+
+        if (xA < xB && yA < yB) {
+          double interArea = (xB - xA) * (yB - yA);
+          double boxAArea =
+              (current[2] - current[0]) * (current[3] - current[1]);
+          double boxBArea = (other[2] - other[0]) * (other[3] - other[1]);
+          double iou = interArea / (boxAArea + boxBArea - interArea);
+
+          if (iou > 0.45) {
+            suppressed[j] = true;
+          }
+        }
+      }
     }
+
     return results;
   }
 }

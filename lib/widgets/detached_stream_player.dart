@@ -34,8 +34,10 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
   int _currentHeight = 0;
 
   // Stats
-  int _fps = 0;
-  int _displayedFrameCount = 0;
+  double _pipelineFPS = 0.0;
+  int _decodeMs = 0;
+  int _inferenceMs = 0;
+  int _postprocessMs = 0;
   Timer? _fpsTimer;
   StreamSubscription? _frameSubscription;
 
@@ -43,18 +45,14 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
   bool _isDecodingFrame = false;
   ProcessedFrame? _pendingFrame;
 
+  // Track frames for averaging FPS
+  List<double> _recentFPS = [];
+  static const int FPS_SAMPLE_SIZE = 10;
+
   @override
   void initState() {
     super.initState();
     _initialize();
-    _fpsTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (mounted) {
-        setState(() {
-          _fps = _displayedFrameCount;
-          _displayedFrameCount = 0;
-        });
-      }
-    });
   }
 
   Future<void> _initialize() async {
@@ -88,11 +86,15 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
     }
   }
 
-  /// Decode and display a frame with proper UI thread management
+  /// Decode and display a frame with proper UI thread management and FPS calculation
   void _decodeAndDisplayFrame(ProcessedFrame frame) {
     if (!mounted || !_isActive) return;
 
     _isDecodingFrame = true;
+
+    // Extract pipeline FPS and timing from frame timestamps
+    final frameFPS = frame.pipelineFPS;
+    final timing = frame.timingBreakdown;
 
     // Schedule frame decoding after current frame to avoid blocking during build
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -114,14 +116,26 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
               return;
             }
 
-            // Update state with decoded image
+            // Update state with decoded image and FPS stats
             setState(() {
               _currentImage?.dispose();
               _currentImage = image;
               _currentDetections = frame.detections;
               _currentWidth = frame.width;
               _currentHeight = frame.height;
-              _displayedFrameCount++;
+
+              // Update FPS with moving average for stability
+              _recentFPS.add(frameFPS);
+              if (_recentFPS.length > FPS_SAMPLE_SIZE) {
+                _recentFPS.removeAt(0);
+              }
+              _pipelineFPS =
+                  _recentFPS.reduce((a, b) => a + b) / _recentFPS.length;
+
+              // Update timing breakdown
+              _decodeMs = timing['decode'] ?? 0;
+              _inferenceMs = timing['inference'] ?? 0;
+              _postprocessMs = timing['postprocess'] ?? 0;
             });
 
             _isDecodingFrame = false;
@@ -224,13 +238,23 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
                       ),
                     ),
                   Text(
-                    "FPS: $_fps",
+                    "FPS: ${_pipelineFPS.toStringAsFixed(1)}",
                     style: const TextStyle(
                       color: Colors.greenAccent,
                       fontSize: 10,
                       fontFamily: 'monospace',
+                      fontWeight: FontWeight.bold,
                     ),
                   ),
+                  if (_decodeMs > 0 || _inferenceMs > 0)
+                    Text(
+                      "D:${_decodeMs}ms I:${_inferenceMs}ms",
+                      style: TextStyle(
+                        color: Colors.grey[400],
+                        fontSize: 8,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
                   if (widget.modelPath != null)
                     const Text(
                       "AI: ON",
