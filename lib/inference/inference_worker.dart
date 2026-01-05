@@ -1,12 +1,13 @@
 import 'dart:async';
 import 'dart:collection';
-import 'dart:ffi';
 import 'dart:io';
 import 'dart:isolate';
-import 'package:ffi/ffi.dart';
+
 import 'package:flutter/foundation.dart';
-import 'package:native_onnx/native_onnx.dart';
 import 'package:smart_store_linux/inference/messages.dart';
+import 'package:smart_store_linux/inference/backend/inference_backend.dart';
+import 'package:smart_store_linux/inference/backend/onnx_backend.dart';
+import 'package:smart_store_linux/inference/backend/rknn_backend.dart';
 
 // ============================================================================
 // WORKER ISOLATE - Handles inference in background
@@ -23,14 +24,18 @@ void inferenceWorkerEntry(WorkerInit init) {
 /// Inference worker that runs in a separate isolate
 ///
 /// Responsibilities:
-/// - Managing ONNX sessions for models
+/// - Managing inference sessions via InquiryBackend
 /// - Batching inference requests
-/// - Running inference on GPU
+/// - Running inference on available hardware (GPU/NPU)
 /// - Post-processing YOLO outputs
 class InferenceWorker {
   final SendPort mainSendPort;
   final ReceivePort _workerReceivePort = ReceivePort();
-  final Map<String, NativeOrtSession> _sessions = {};
+
+  late InferenceBackend _backend;
+  // Map modelPath -> modelId (int)
+  final Map<String, int> _loadedModels = {};
+
   final Queue<WorkerRequest> _requestQueue = Queue<WorkerRequest>();
 
   // ========================================
@@ -49,14 +54,22 @@ class InferenceWorker {
   void run() async {
     // 1. Send Port IMMEDIATELY
     mainSendPort.send(_workerReceivePort.sendPort);
-    debugPrint("Worker: Port Sent. Initializing Native Service...");
+
+    // 2. Select Backend
+    if (Platform.isAndroid) {
+      _backend = RknnInferenceBackend();
+      debugPrint("Worker: Selected RKNN Backend");
+    } else {
+      _backend = OnnxInferenceBackend();
+      debugPrint("Worker: Selected ONNX Backend");
+    }
 
     try {
-      await NativeInferenceService().init();
-      debugPrint("Worker: Native Service Init Done. Sending Ready.");
+      await _backend.init();
+      debugPrint("Worker: Backend initialized");
       mainSendPort.send(WorkerReady(true));
     } catch (e) {
-      debugPrint("Worker: Native Init Failed: $e");
+      debugPrint("Worker: Init Failed: $e");
       mainSendPort.send(WorkerReady(false, e.toString()));
       return;
     }
@@ -133,13 +146,11 @@ class InferenceWorker {
   /// Process a batch of inference requests
   Future<void> _processBatch(List<WorkerRequest> batch) async {
     final modelPath = batch.first.modelPath;
-    Pointer<Float>? batchBuffer;
 
     // Capture when processing actually starts (excludes queue wait time)
     final processingStartMs = DateTime.now().millisecondsSinceEpoch;
 
     final totalStopwatch = Stopwatch()..start();
-    final preprocessStopwatch = Stopwatch();
     final inferenceStopwatch = Stopwatch();
     final postprocessStopwatch = Stopwatch();
 
@@ -147,151 +158,138 @@ class InferenceWorker {
       // ========================================
       // Load Model Session
       // ========================================
-      var session = _sessions[modelPath];
-      if (session == null) {
-        final file = File(modelPath);
-        if (file.existsSync()) {
-          try {
-            debugPrint("📥 Loading model: ${modelPath.split('/').last}");
-            final loadStart = Stopwatch()..start();
-            session = await NativeOrtSession.fromFile(file);
-            _sessions[modelPath] = session;
-            debugPrint(
-              "✓ Model loaded in ${loadStart.elapsedMilliseconds}ms. Total models: ${_sessions.length}",
-            );
-          } catch (e) {
-            debugPrint("❌ Model load error: $e");
-          }
-        }
-        if (session == null) {
-          _failBatch(batch, "Failed to load model $modelPath");
+      var modelId = _loadedModels[modelPath];
+
+      if (modelId == null) {
+        try {
+          debugPrint("📥 Loading model: ${modelPath.split('/').last}");
+          final loadStart = Stopwatch()..start();
+
+          modelId = await _backend.loadModel(modelPath, ModelType.yolo);
+          _loadedModels[modelPath] = modelId;
+
+          debugPrint(
+            "✓ Model loaded in ${loadStart.elapsedMilliseconds}ms (ID: $modelId)",
+          );
+        } catch (e) {
+          debugPrint("❌ Model load error: $e");
+          _failBatch(batch, "Failed to load model: $e");
           return;
         }
       }
 
       // ========================================
-      // Preprocess Images into Batch Buffer
-      // ========================================
-      preprocessStopwatch.start();
-
-      final int batchSize = batch.length;
-      final int singleImageFloats = 3 * 640 * 640;
-      final int totalFloats = batchSize * singleImageFloats;
-
-      batchBuffer = calloc<Float>(totalFloats);
-
-      for (int i = 0; i < batchSize; i++) {
-        final req = batch[i];
-        final Pointer<Uint8> inPtr = calloc<Uint8>(req.imageBytes.length);
-        final inList = inPtr.asTypedList(req.imageBytes.length);
-        inList.setAll(0, req.imageBytes);
-
-        final Pointer<Float> outPtr = Pointer.fromAddress(
-          batchBuffer.address + (i * singleImageFloats * sizeOf<Float>()),
-        );
-
-        NativeInferenceService().preprocessImage(
-          inPtr,
-          req.width,
-          req.height,
-          outPtr,
-        );
-        calloc.free(inPtr);
-      }
-
-      preprocessStopwatch.stop();
-      final preprocessMs = preprocessStopwatch.elapsedMilliseconds;
-
-      // ========================================
-      // Run Batch Inference
+      // Run Inference
       // ========================================
       inferenceStopwatch.start();
 
-      final inputTensor = NativeOrtValueTensor.createTensorFromPointer(
-        batchBuffer,
-        [batchSize, 3, 640, 640],
-      );
-      final inputs = {'images': inputTensor};
-      final runOptions = NativeOrtRunOptions();
+      final inputs = batch
+          .map(
+            (req) => InferenceInput(
+              imageBytes: Uint8List.fromList(req.imageBytes),
+              width: req.width,
+              height: req.height,
+              streamId: req.streamId,
+            ),
+          )
+          .toList();
 
-      try {
-        final results = session.run(runOptions, inputs);
+      final results = await _backend.run(modelId, inputs);
 
-        inferenceStopwatch.stop();
-        final inferenceMs = inferenceStopwatch.elapsedMilliseconds;
+      inferenceStopwatch.stop();
+      final inferenceMs = inferenceStopwatch.elapsedMilliseconds;
 
-        // ========================================
-        // Process Results
-        // ========================================
-        postprocessStopwatch.start();
+      if (results.length != batch.length) {
+        _failBatch(
+          batch,
+          "Result count mismatch: ${results.length} vs ${batch.length}",
+        );
+        return;
+      }
 
-        if (results.isNotEmpty) {
-          final dynamic rawOutput = results[0][0];
+      // ========================================
+      // Post Process
+      // ========================================
+      postprocessStopwatch.start();
 
-          if (rawOutput is List<double> || rawOutput is List) {
-            final List<double> data = (rawOutput is List<double>)
-                ? rawOutput
-                : (rawOutput as List).cast<double>();
-
-            final int expectedSingleSize = 84 * 8400;
-            final int expectedTotalSize = batchSize * expectedSingleSize;
-
-            // Validate output size
-            if (data.length != expectedTotalSize) {
-              debugPrint(
-                "⚠️ Output size mismatch: ${data.length} vs expected $expectedTotalSize",
-              );
-              _failBatch(
-                batch,
-                "Output size mismatch: ${data.length} (expected $expectedTotalSize)",
-              );
-              return;
-            }
-
-            // ========================================
-            // Split Batch Results to Individual Streams
-            // ========================================
-            for (int i = 0; i < batchSize; i++) {
-              final start = i * expectedSingleSize;
-              final end = start + expectedSingleSize;
-              _postProcessAndSend(
-                data.sublist(start, end),
-                batch[i],
-                processingStartMs,
-              );
-            }
-          } else {
-            _failBatch(
-              batch,
-              "Unexpected output type: ${rawOutput.runtimeType}",
-            );
-          }
-        } else {
-          _failBatch(batch, "Empty Results from session.run");
+      for (int i = 0; i < batch.length; i++) {
+        final result = results[i];
+        if (result.outputs.isEmpty) {
+          _failBatch([batch[i]], "Empty inference result");
+          continue;
         }
 
-        postprocessStopwatch.stop();
-        final postprocessMs = postprocessStopwatch.elapsedMilliseconds;
-        totalStopwatch.stop();
-        final totalMs = totalStopwatch.elapsedMilliseconds;
+        final req = batch[i];
 
-        // Log detailed timing breakdown
-        debugPrint(
-          "⏱️ Batch[${batchSize}] timing: "
-          "Preprocess=${preprocessMs}ms | "
-          "Inference=${inferenceMs}ms | "
-          "Postprocess=${postprocessMs}ms | "
-          "Total=${totalMs}ms",
-        );
-      } finally {
-        inputTensor.release();
-        runOptions.release();
+        try {
+          List<List<double>> detections = [];
+
+          if (result.metadata['format'] == 'detections_f32_6') {
+            // Native C++ Processed Detections
+            final bytes = result.outputs[0] as List<int>;
+            final floats = Float32List.view(Uint8List.fromList(bytes).buffer);
+            // Format: [Class, Score, Left, Top, Right, Bottom]
+            for (int i = 0; i < floats.length; i += 6) {
+              detections.add([
+                floats[i + 2], // x1
+                floats[i + 3], // y1
+                floats[i + 4], // x2
+                floats[i + 5], // y2
+                floats[i + 1], // score
+                floats[i + 0], // class
+              ]);
+            }
+          } else if (Platform.isAndroid &&
+              result.outputs.isNotEmpty &&
+              result.outputs[0] is List<int>) {
+            // RKNN specialized post-processing (Legacy / Fallback)
+            // We need to cast back to expected types
+            final outputs = result.outputs.map((e) => e.cast<int>()).toList();
+            final attrs = result.metadata['attrs'] as List<dynamic>? ?? [];
+            if (attrs.isNotEmpty) {
+              detections = _postProcessYoloInt8(
+                outputs,
+                attrs,
+                req.width,
+                req.height,
+              );
+            } else {
+              debugPrint("Missing attributes for RKNN post-processing");
+            }
+          } else if (result.outputs.isNotEmpty &&
+              result.outputs[0] is List<double>) {
+            // ONNX / Float post-processing
+            final data = result.outputs[0].cast<double>();
+            detections = _postProcessYolo(data, req.width, req.height);
+          }
+
+          mainSendPort.send(
+            WorkerResponse(
+              streamId: req.streamId,
+              requestId: req.requestId,
+              modelPath: req.modelPath,
+              detections: detections,
+              processingStartMs: processingStartMs,
+            ),
+          );
+        } catch (e) {
+          debugPrint("Postprocess Error: $e");
+          _failBatch([req], "Postprocess: $e");
+        }
       }
+
+      postprocessStopwatch.stop();
+      totalStopwatch.stop();
+
+      debugPrint(
+        "⏱️ Batch[${batch.length}] timing: "
+        "Inference=${inferenceMs}ms | "
+        "Postprocess=${postprocessStopwatch.elapsedMilliseconds}ms | "
+        "Total=${totalStopwatch.elapsedMilliseconds}ms",
+      );
     } catch (e, st) {
       debugPrint("Worker Batch Error: $e\n$st");
       _failBatch(batch, e.toString());
-    } finally {
-      if (batchBuffer != null) calloc.free(batchBuffer);
     }
   }
 
@@ -312,118 +310,259 @@ class InferenceWorker {
     }
   }
 
-  /// Post-process and send results for a single request
-  void _postProcessAndSend(
-    List<double> data,
-    WorkerRequest req,
-    int processingStartMs,
+  /// Post-process YOLO output - Int8 Quantized with 3 heads
+  /// Handles standard YOLOv5/v7 anchors and strides (8, 16, 32)
+  /// Converts coordinates from model space (640x640) to original image space
+  List<List<double>> _postProcessYoloInt8(
+    List<List<int>> outputs,
+    List<dynamic> attrs,
+    int originalWidth,
+    int originalHeight,
   ) {
-    try {
-      final detections = _postProcessYolo(data);
-      mainSendPort.send(
-        WorkerResponse(
-          streamId: req.streamId,
-          requestId: req.requestId,
-          modelPath: req.modelPath,
-          detections: detections,
-          processingStartMs: processingStartMs,
-        ),
-      );
-    } catch (e) {
-      debugPrint("⚠️ Postprocess error for stream ${req.streamId}: $e");
-      mainSendPort.send(
-        WorkerResponse(
-          streamId: req.streamId,
-          requestId: req.requestId,
-          modelPath: req.modelPath,
-          detections: [],
-          error: "Postprocess: $e",
-          processingStartMs: processingStartMs,
-        ),
-      );
+    if (outputs.length != 3 || attrs.length != 3) {
+      debugPrint("⚠️ Unexpected output count: ${outputs.length}");
+      return [];
     }
+
+    final candidates = <List<double>>[];
+    const anchors = [
+      [10, 13, 16, 30, 33, 23], // Stride 8 (P3)
+      [30, 61, 62, 45, 59, 119], // Stride 16 (P4)
+      [116, 90, 156, 198, 373, 326], // Stride 32 (P5)
+    ];
+
+    // Assuming input 640x640
+    const inputSize = 640;
+    const confThresh = 0.5;
+
+    for (int i = 0; i < 3; i++) {
+      final data = outputs[i];
+      final zp = attrs[i].zp;
+      final scale = attrs[i].scale;
+      final stride = 8 << i; // 8, 16, 32
+      final gridSize = inputSize ~/ stride;
+      final gridLen = gridSize * gridSize;
+      final anchorList = anchors[i];
+
+      // Threshold in int8 to avoid dequantizing everything
+      // Val >= (thresh / scale) + zp
+      final threshInt8 = (confThresh / scale) + zp;
+
+      for (int a = 0; a < 3; a++) {
+        for (int y = 0; y < gridSize; y++) {
+          for (int x = 0; x < gridSize; x++) {
+            // Check box confidence (index 4)
+            // Channel offset = (a * 85) + 4
+            // Index = channel_offset * gridLen + y * gridSize + x
+            final pixelIdx = y * gridSize + x;
+            final confChIdx = (a * 85) + 4;
+            final confIdx = confChIdx * gridLen + pixelIdx;
+
+            if (confIdx >= data.length) continue; // Safety
+
+            final boxConfRaw = data[confIdx];
+            if (boxConfRaw >= threshInt8) {
+              // Dequantize confidence
+              final boxConf = (boxConfRaw - zp) * scale;
+
+              // Find best class
+              // Iterate channels 5..84
+              int maxClassId = -1;
+              int maxClassRaw = -129;
+
+              // Optimization: check if max class prob * box conf > threshold
+              // In int8 loop
+              for (int c = 0; c < 80; c++) {
+                final clsChIdx = (a * 85) + 5 + c;
+                final clsIdx = clsChIdx * gridLen + pixelIdx;
+                if (clsIdx < data.length) {
+                  final val = data[clsIdx];
+                  if (val > maxClassRaw) {
+                    maxClassRaw = val;
+                    maxClassId = c;
+                  }
+                }
+              }
+
+              if (maxClassRaw >= threshInt8) {
+                // Rough check
+                final classProb = (maxClassRaw - zp) * scale;
+                final score = boxConf * classProb;
+
+                if (score > confThresh) {
+                  // Dequantize box
+                  // x, y, w, h are at indices 0, 1, 2, 3
+                  final xRaw = data[((a * 85) + 0) * gridLen + pixelIdx];
+                  final yRaw = data[((a * 85) + 1) * gridLen + pixelIdx];
+                  final wRaw = data[((a * 85) + 2) * gridLen + pixelIdx];
+                  final hRaw = data[((a * 85) + 3) * gridLen + pixelIdx];
+
+                  double boxX = ((xRaw - zp) * scale) * 2.0 - 0.5;
+                  double boxY = ((yRaw - zp) * scale) * 2.0 - 0.5;
+                  double boxW = ((wRaw - zp) * scale) * 2.0;
+                  double boxH = ((hRaw - zp) * scale) * 2.0;
+
+                  boxX = (boxX + x) * stride;
+                  boxY = (boxY + y) * stride;
+                  boxW = (boxW * boxW) * anchorList[a * 2];
+                  boxH = (boxH * boxH) * anchorList[a * 2 + 1];
+
+                  double x1 = boxX - boxW / 2;
+                  double y1 = boxY - boxH / 2;
+                  double x2 = boxX + boxW / 2;
+                  double y2 = boxY + boxH / 2;
+
+                  // Convert from model space to original image space (stretch mode)
+                  final stretchScaleW = inputSize / originalWidth.toDouble();
+                  final stretchScaleH = inputSize / originalHeight.toDouble();
+
+                  final x1Original = x1 / stretchScaleW;
+                  final y1Original = y1 / stretchScaleH;
+                  final x2Original = x2 / stretchScaleW;
+                  final y2Original = y2 / stretchScaleH;
+
+                  if (x1 >= 0 &&
+                      y1 >= 0 &&
+                      x2 <= inputSize &&
+                      y2 <= inputSize) {
+                    candidates.add(<double>[
+                      x1Original,
+                      y1Original,
+                      x2Original,
+                      y2Original,
+                      score.toDouble(),
+                      maxClassId.toDouble(),
+                    ]);
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // NMS
+    return _performNMS(candidates);
   }
 
-  /// Post-process YOLO output - optimized for low latency
-  /// Skips NMS for speed, returns top detections above threshold
-  List<dynamic> _postProcessYolo(List<double> data) {
-    int rows = 84;
-    int cols = 8400;
-    if (data.length != rows * cols) return [];
+  /// Process YOLOv8 Float Output
+  /// Expected shape: [1, 84, 8400] flattened to [705600]
+  /// Layout: 84 rows (channels), 8400 columns (anchors)
+  /// Row 0: x (center)
+  /// Row 1: y (center)
+  /// Row 2: w
+  /// Row 3: h
+  /// Rows 4..83: Class probabilities
+  /// Converts coordinates from model space (640x640) to original image space
+  List<List<double>> _postProcessYolo(
+    List<double> data,
+    int originalWidth,
+    int originalHeight,
+  ) {
+    const int numClasses = 80;
+    const int numAnchors = 8400; // 640x640 input -> 8400 anchors
+    const int numChannels = numClasses + 4; // 84
 
-    List<List<double>> candidates = [];
+    if (data.length != numChannels * numAnchors) {
+      debugPrint(
+        "⚠️ Unexpected data length ${data.length}, expected ${numChannels * numAnchors}",
+      );
+      return [];
+    }
 
-    // Extract detections above confidence threshold
-    for (int i = 0; i < cols; i++) {
-      double maxScore = 0;
-      int cls = -1;
+    final candidates = <List<double>>[];
+    const double confThreshold = 0.45;
 
-      // Find class with highest confidence
-      for (int c = 4; c < rows; c++) {
-        int index = c * cols + i;
-        double score = data[index];
+    // Data is likely [84, 8400] flattened.
+    // Index = channel * 8400 + anchor_index
+    // This allows sequential access per row, but we iterate per anchor.
+    // So we need to jump by 8400 to get next channel for same anchor.
+
+    for (int i = 0; i < numAnchors; i++) {
+      // Find max class score first to filter quickly
+      double maxScore = -1.0;
+      int maxClassId = -1;
+
+      // Class scores start at channel 4
+      for (int c = 0; c < numClasses; c++) {
+        // channel (4 + c)
+        // index = (4 + c) * numAnchors + i
+        final score = data[(4 + c) * numAnchors + i];
         if (score > maxScore) {
           maxScore = score;
-          cls = c - 4;
+          maxClassId = c;
         }
       }
 
-      // Use 0.5 threshold for good balance
-      if (maxScore > 0.5) {
-        double cx = data[0 * cols + i];
-        double cy = data[1 * cols + i];
-        double w = data[2 * cols + i];
-        double h = data[3 * cols + i];
-        double x1 = cx - w / 2;
-        double y1 = cy - h / 2;
-        double x2 = cx + w / 2;
-        double y2 = cy + h / 2;
+      if (maxScore > confThreshold) {
+        // Extract box coordinates
+        // cx, cy, w, h are at channels 0, 1, 2, 3
+        final cx = data[0 * numAnchors + i];
+        final cy = data[1 * numAnchors + i];
+        final w = data[2 * numAnchors + i];
+        final h = data[3 * numAnchors + i];
 
-        // Validate bounding box is within frame
-        if (x1 >= 0 && y1 >= 0 && x2 <= 640 && y2 <= 640) {
-          candidates.add([x1, y1, x2, y2, maxScore, cls.toDouble()]);
-        }
+        final x1 = cx - w / 2;
+        final y1 = cy - h / 2;
+        final x2 = cx + w / 2;
+        final y2 = cy + h / 2;
+
+        // Convert from model space (640x640) to original image space (stretch mode)
+        // This matches the Android C++ post_process.cc logic
+        const modelSize = 640.0;
+        final stretchScaleW = modelSize / originalWidth;
+        final stretchScaleH = modelSize / originalHeight;
+
+        final x1Original = x1 / stretchScaleW;
+        final y1Original = y1 / stretchScaleH;
+        final x2Original = x2 / stretchScaleW;
+        final y2Original = y2 / stretchScaleH;
+
+        candidates.add([
+          x1Original,
+          y1Original,
+          x2Original,
+          y2Original,
+          maxScore,
+          maxClassId.toDouble(),
+        ]);
       }
     }
 
-    // Sort by confidence and apply fast NMS
+    return _performNMS(candidates);
+  }
+
+  List<List<double>> _performNMS(List<List<double>> candidates) {
     candidates.sort((a, b) => b[4].compareTo(a[4]));
 
-    List<dynamic> results = [];
-    List<bool> suppressed = List.filled(candidates.length, false);
+    final results = <List<double>>[];
+    final suppressed = List<bool>.filled(candidates.length, false);
 
-    for (int i = 0; i < candidates.length && results.length < 20; i++) {
+    for (int i = 0; i < candidates.length; i++) {
       if (suppressed[i]) continue;
-
-      var current = candidates[i];
+      final current = candidates[i];
       results.add(current);
 
-      // Suppress overlapping boxes
       for (int j = i + 1; j < candidates.length; j++) {
         if (suppressed[j]) continue;
+        final other = candidates[j];
 
-        var other = candidates[j];
-
-        // Fast IoU calculation
+        // IoU
         double xA = current[0] > other[0] ? current[0] : other[0];
         double yA = current[1] > other[1] ? current[1] : other[1];
         double xB = current[2] < other[2] ? current[2] : other[2];
         double yB = current[3] < other[3] ? current[3] : other[3];
 
         if (xA < xB && yA < yB) {
-          double interArea = (xB - xA) * (yB - yA);
-          double boxAArea =
-              (current[2] - current[0]) * (current[3] - current[1]);
-          double boxBArea = (other[2] - other[0]) * (other[3] - other[1]);
-          double iou = interArea / (boxAArea + boxBArea - interArea);
-
-          if (iou > 0.45) {
-            suppressed[j] = true;
-          }
+          double inter = (xB - xA) * (yB - yA);
+          double areaA = (current[2] - current[0]) * (current[3] - current[1]);
+          double areaB = (other[2] - other[0]) * (other[3] - other[1]);
+          double iou = inter / (areaA + areaB - inter);
+          if (iou > 0.45) suppressed[j] = true;
         }
       }
     }
-
     return results;
   }
 }

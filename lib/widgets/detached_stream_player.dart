@@ -342,25 +342,32 @@ class DetectionOverlayPainter extends CustomPainter {
       // relative to the 640x640 model input.
 
       if (det is List && det.length >= 4) {
+        // Coordinates from C++ are already in original image space (e.g., 1280x720)
+        // NOT in model space (320x320) - the C++ post_process already converted them
         double x1 = (det[0] as num).toDouble();
         double y1 = (det[1] as num).toDouble();
         double x2 = (det[2] as num).toDouble();
         double y2 = (det[3] as num).toDouble();
 
-        // Transform 640x640 -> Original
-        // The inference input was resized from Original.
-        // So x / 640 = originalX / originalW
+        // Transform from original image coords to screen coords
+        // The image is displayed with BoxFit.contain, so we need to:
+        // 1. Scale by the contain scale factor (same for both X and Y to maintain aspect ratio)
+        // 2. Add the centering offset
+        double screenX1 = (x1 * scale) + offsetX;
+        double screenY1 = (y1 * scale) + offsetY;
+        double screenX2 = (x2 * scale) + offsetX;
+        double screenY2 = (y2 * scale) + offsetY;
 
-        double origX1 = x1 / 640 * originalSize.width;
-        double origY1 = y1 / 640 * originalSize.height;
-        double origX2 = x2 / 640 * originalSize.width;
-        double origY2 = y2 / 640 * originalSize.height;
-
-        // Transform Original -> Render (Screen)
-        double screenX1 = (origX1 * scale) + offsetX;
-        double screenY1 = (origY1 * scale) + offsetY;
-        double screenX2 = (origX2 * scale) + offsetX;
-        double screenY2 = (origY2 * scale) + offsetY;
+        // Debug: Print first detection
+        if (detections.indexOf(det) == 0) {
+          print(
+            'DART RENDER: original=(${x1.toInt()},${y1.toInt()},${x2.toInt()},${y2.toInt()}) '
+            'originalSize=${originalSize.width.toInt()}x${originalSize.height.toInt()} '
+            'canvasSize=${size.width.toInt()}x${size.height.toInt()} '
+            'scale=$scale offset=($offsetX,$offsetY) '
+            'screen=(${screenX1.toInt()},${screenY1.toInt()},${screenX2.toInt()},${screenY2.toInt()})',
+          );
+        }
 
         // Draw bounding box
         canvas.drawRect(

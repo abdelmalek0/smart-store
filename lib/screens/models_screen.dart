@@ -1,5 +1,7 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:smart_store_linux/theme/app_theme.dart';
 import 'package:smart_store_linux/providers/model_provider.dart';
@@ -103,20 +105,95 @@ class ModelsScreen extends StatelessWidget {
                   label: "Pick .onnx File",
                   icon: Icons.folder_open,
                   onPressed: () async {
-                    try {
-                      FilePickerResult? result = await FilePicker.platform
-                          .pickFiles(
-                            type: FileType.custom,
-                            allowedExtensions: ['onnx'],
-                          );
+                    if (Platform.isAndroid) {
+                      // Android: Manual path entry (scoped storage workaround)
+                      final controller = TextEditingController();
+                      final String? path = await showDialog<String>(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          backgroundColor: AppTheme.surface,
+                          title: const ModernLabel(
+                            'Enter Model Path',
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                          content: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const ModernLabel(
+                                'Enter the full path to your .rknn file:',
+                                fontSize: 12,
+                                color: Colors.white70,
+                              ),
+                              const SizedBox(height: 12),
+                              TextField(
+                                controller: controller,
+                                decoration: const InputDecoration(
+                                  hintText: '/sdcard/Download/model.rknn',
+                                  hintStyle: TextStyle(color: Colors.white38),
+                                ),
+                                style: const TextStyle(color: Colors.white),
+                                autofocus: true,
+                              ),
+                            ],
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(ctx),
+                              child: const ModernLabel('Cancel'),
+                            ),
+                            TextButton(
+                              onPressed: () =>
+                                  Navigator.pop(ctx, controller.text.trim()),
+                              child: const ModernLabel(
+                                'OK',
+                                color: AppTheme.accent,
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
 
-                      if (result != null && result.files.single.path != null) {
-                        setState(() {
-                          selectedPath = result.files.single.path;
-                        });
+                      if (path != null && path.isNotEmpty) {
+                        final file = File(path);
+                        if (!path.toLowerCase().endsWith('.rknn')) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('File must have .rknn extension'),
+                              backgroundColor: AppTheme.destructive,
+                            ),
+                          );
+                        } else if (!await file.exists()) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('File not found at path'),
+                              backgroundColor: AppTheme.destructive,
+                            ),
+                          );
+                        } else {
+                          setState(() {
+                            selectedPath = path;
+                          });
+                        }
                       }
-                    } catch (e) {
-                      debugPrint("Error picking file: $e");
+                    } else {
+                      // Desktop: Use file picker
+                      try {
+                        FilePickerResult? result = await FilePicker.platform
+                            .pickFiles(
+                              type: FileType.custom,
+                              allowedExtensions: ['onnx'],
+                            );
+                        if (result != null &&
+                            result.files.single.path != null) {
+                          setState(() {
+                            selectedPath = result.files.single.path;
+                          });
+                        }
+                      } catch (e) {
+                        debugPrint("Error picking file: $e");
+                      }
                     }
                   },
                 ),

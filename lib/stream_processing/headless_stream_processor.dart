@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:collection';
 import 'dart:isolate';
+import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:native_onnx/native_onnx.dart';
 import 'package:smart_store_linux/models/frames.dart';
@@ -25,9 +26,10 @@ class HeadlessStreamProcessor {
   // Freeze mode - stop inference but keep displaying raw frames
   bool _isFrozen = false;
 
-  // Queue Configuration - Design Spec Limits
-  static const int INFERENCE_QUEUE_MAX_SIZE = 3; // Buffer for incoming frames
-  static const int DISPLAY_QUEUE_MAX_SIZE = 5; // Buffer for processed frames
+  // Queue Configuration - Minimal for memory safety during slow inference
+  // ✓ REDUCED: Prevent memory buildup when inference is slow (was 3/5)
+  static const int INFERENCE_QUEUE_MAX_SIZE = 1; // Only 1 pending frame
+  static const int DISPLAY_QUEUE_MAX_SIZE = 2; // Minimal display buffer
 
   // InferenceQueue: Buffers raw frames from capture (max 3)
   // Purpose: Maintain smooth playback even if inference is slower than capture
@@ -119,7 +121,11 @@ class HeadlessStreamProcessor {
     try {
       _captureIsolate = await Isolate.spawn(
         captureLoop,
-        IsolateInitParams(stream.url, _captureReceivePort!.sendPort),
+        IsolateInitParams(
+          _captureReceivePort!.sendPort,
+          stream.url,
+          RootIsolateToken.instance!,
+        ),
       );
 
       _captureReceivePort!.listen((message) {

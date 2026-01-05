@@ -1,0 +1,1 @@
+/home/smartprints/sandbox/smart_store_linux/build/native_rknn/intermediates/cxx/Debug/6c556i5z/obj/armeabi-v7a

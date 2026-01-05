@@ -6,7 +6,7 @@ import 'package:native_onnx/src/ffi_types.dart';
 import 'package:path/path.dart' as p;
 
 /// Native inference service that wraps the C++ ONNX Runtime bridge
-/// 
+///
 /// Singleton service that manages:
 /// - ONNX Runtime initialization
 /// - Session creation and management
@@ -60,6 +60,9 @@ class NativeInferenceService {
           );
           _lib = DynamicLibrary.open(libraryPath);
         }
+      } else if (Platform.isAndroid) {
+        // On Android, load the library bundled in the APK
+        _lib = DynamicLibrary.open('libnative_onnx_plugin.so');
       }
 
       if (_lib != null) {

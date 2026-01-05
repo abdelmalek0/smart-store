@@ -1,9 +1,11 @@
 import 'dart:isolate';
+import 'dart:ui';
 
 /// Parameters for initializing the video capture isolate
 class IsolateInitParams {
-  final String videoUrl;
   final SendPort sendPort;
+  final String videoUrl;
+  final RootIsolateToken rootIsolateToken;
 
-  IsolateInitParams(this.videoUrl, this.sendPort);
+  IsolateInitParams(this.sendPort, this.videoUrl, this.rootIsolateToken);
 }

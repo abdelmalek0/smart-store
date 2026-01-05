@@ -1,0 +1,41 @@
+{
+  "buildFiles": [
+    "/home/smartprints/sandbox/smart_store_linux/packages/native_rknn/android/CMakeLists.txt"
+  ],
+  "cleanCommandsComponents": [
+    [
+      "/home/smartprints/Android/Sdk/cmake/3.22.1/bin/ninja",
+      "-C",
+      "/home/smartprints/sandbox/smart_store_linux/packages/native_rknn/android/.cxx/RelWithDebInfo/j4n5q4z5/arm64-v8a",
+      "clean"
+    ]
+  ],
+  "buildTargetsCommandComponents": [
+    "/home/smartprints/Android/Sdk/cmake/3.22.1/bin/ninja",
+    "-C",
+    "/home/smartprints/sandbox/smart_store_linux/packages/native_rknn/android/.cxx/RelWithDebInfo/j4n5q4z5/arm64-v8a",
+    "{LIST_OF_TARGETS_TO_BUILD}"
+  ],
+  "libraries": {
+    "native_rknn::@6890427a1f51a3e7e1df": {
+      "toolchain": "toolchain",
+      "abi": "arm64-v8a",
+      "artifactName": "native_rknn",
+      "output": "/home/smartprints/sandbox/smart_store_linux/build/native_rknn/intermediates/cxx/RelWithDebInfo/j4n5q4z5/obj/arm64-v8a/libnative_rknn.so",
+      "runtimeFiles": [
+        "/home/smartprints/sandbox/smart_store_linux/packages/native_rknn/android/src/main/jniLibs/arm64-v8a/librknnrt.so",
+        "/home/smartprints/sandbox/smart_store_linux/packages/native_rknn/android/src/main/jniLibs/arm64-v8a/librga.so"
+      ]
+    }
+  },
+  "toolchains": {
+    "toolchain": {
+      "cCompilerExecutable": "/home/smartprints/Android/Sdk/ndk/27.0.12077973/toolchains/llvm/prebuilt/linux-x86_64/bin/clang.lld",
+      "cppCompilerExecutable": "/home/smartprints/Android/Sdk/ndk/27.0.12077973/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++.lld"
+    }
+  },
+  "cFileExtensions": [],
+  "cppFileExtensions": [
+    "cc"
+  ]
+}

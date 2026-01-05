@@ -1,0 +1,1 @@
+/home/smartprints/sandbox/smart_store_linux/packages/native_rknn/android/CMakeLists.txt

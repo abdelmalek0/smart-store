@@ -1,6 +1,8 @@
+import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:fvp/fvp.dart' as fvp;
+import 'package:permission_handler/permission_handler.dart';
 
 import 'package:window_manager/window_manager.dart';
 import 'package:smart_store_linux/theme/app_theme.dart';
@@ -18,26 +20,36 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   fvp.registerWith();
 
-  await windowManager.ensureInitialized();
+  // Only initialize window_manager on desktop platforms
+  if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+    await windowManager.ensureInitialized();
+  }
 
   // Initialize Config Service
   await ConfigService.instance.init();
 
+  if (Platform.isAndroid) {
+    await _requestPermissions();
+  }
+
   // Initialize Inference Service (ONNX Runtime) early to ensure Logger is registered
   await InferenceService().init();
 
-  WindowOptions windowOptions = const WindowOptions(
-    size: Size(1280, 720),
-    center: true,
-    backgroundColor: Colors.transparent,
-    skipTaskbar: false,
-    titleBarStyle: TitleBarStyle.normal,
-  );
+  // Only configure window on desktop platforms
+  if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+    WindowOptions windowOptions = const WindowOptions(
+      size: Size(1280, 720),
+      center: true,
+      backgroundColor: Colors.transparent,
+      skipTaskbar: false,
+      titleBarStyle: TitleBarStyle.normal,
+    );
 
-  windowManager.waitUntilReadyToShow(windowOptions, () async {
-    await windowManager.show();
-    await windowManager.focus();
-  });
+    windowManager.waitUntilReadyToShow(windowOptions, () async {
+      await windowManager.show();
+      await windowManager.focus();
+    });
+  }
 
   runApp(const VisionLabApp());
 }
@@ -99,5 +111,23 @@ class _VisionLabAppState extends State<VisionLabApp> {
   void dispose() {
     _monitor.stop();
     super.dispose();
+  }
+}
+
+Future<void> _requestPermissions() async {
+  debugPrint("Requesting permissions...");
+
+  // Request Manage External Storage (Android 11+)
+  if (await Permission.manageExternalStorage.request().isGranted) {
+    debugPrint("Manage External Storage Granted");
+  } else {
+    debugPrint("Manage External Storage Denied");
+  }
+
+  // Request Legacy Storage (Android 10 and below)
+  if (await Permission.storage.request().isGranted) {
+    debugPrint("Storage Permission Granted");
+  } else {
+    debugPrint("Storage Permission Denied");
   }
 }

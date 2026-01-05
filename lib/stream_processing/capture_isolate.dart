@@ -1,28 +1,146 @@
 import 'dart:async';
 import 'dart:ffi';
+import 'dart:io';
+import 'dart:typed_data';
+import 'dart:ui';
 import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:native_onnx/native_onnx.dart';
 import 'package:smart_store_linux/models/frames.dart';
 import 'package:smart_store_linux/stream_processing/isolate_params.dart';
+import 'package:smart_store_linux/services/ffmpeg_video_service.dart';
 
-/// Long-lived isolate entry point for video capture (must be synchronous)
+/// Long-lived isolate entry point for video capture
 void captureLoop(IsolateInitParams params) {
-  // Capture loop entry - no log needed
   _captureLoopAsync(params);
 }
 
-/// Async implementation of the video capture loop
+/// Async implementation - platform specific
 Future<void> _captureLoopAsync(IsolateInitParams params) async {
-  // Init Native Service ONCE
+  if (Platform.isAndroid) {
+    await _androidFFmpegCaptureLoop(params);
+  } else {
+    await _linuxOpenCVCaptureLoop(params);
+  }
+}
+
+/// Android: FFmpeg via MethodChannel
+Future<void> _androidFFmpegCaptureLoop(IsolateInitParams params) async {
+  // Initialize BackgroundIsolateBinaryMessenger for MethodChannel calls
+  BackgroundIsolateBinaryMessenger.ensureInitialized(params.rootIsolateToken);
+
+  debugPrint("📱 Android: Starting FFmpeg capture via JavaCPP");
+  debugPrint("   URL: ${params.videoUrl}");
+
+  int? videoId;
+  int consecutiveErrors = 0;
+
+  Future<int?> openVideo() async {
+    // --- DIAGNOSTIC START ---
+    try {
+      final uri = Uri.parse(params.videoUrl); // Basic parsing
+      // If parsing fails or host is empty, likely RTSP syntax issues, but let's try
+      if (uri.host.isNotEmpty && uri.hasPort) {
+        debugPrint(
+          "DART DIAGNOSTIC: Attempting Socket connect to ${uri.host}:${uri.port}...",
+        );
+        final socket = await Socket.connect(
+          uri.host,
+          uri.port,
+          timeout: const Duration(seconds: 3),
+        );
+        debugPrint(
+          "DART DIAGNOSTIC: ✓ Socket connected successfully to ${uri.host}:${uri.port}",
+        );
+        socket.destroy();
+      } else {
+        debugPrint(
+          "DART DIAGNOSTIC: Could not parse host/port from URL: ${params.videoUrl}",
+        );
+      }
+    } catch (e) {
+      debugPrint("DART DIAGNOSTIC: ❌ Socket connection failed: $e");
+    }
+    // --- DIAGNOSTIC END ---
+
+    try {
+      final id = await FFmpegVideoService.openVideo(params.videoUrl);
+      if (id != null) {
+        params.sendPort.send(id);
+        debugPrint("✓ FFmpeg: Video opened (id=$id)");
+      } else {
+        debugPrint("❌ FFmpeg: Failed to open video");
+      }
+      return id;
+    } catch (e) {
+      debugPrint("❌ FFmpeg open error: $e");
+      return null;
+    }
+  }
+
+  videoId = await openVideo();
+
+  try {
+    while (true) {
+      if (videoId == null) {
+        videoId = await openVideo();
+        if (videoId == null) {
+          await Future.delayed(const Duration(seconds: 2));
+          continue;
+        }
+        consecutiveErrors = 0;
+      }
+
+      try {
+        final frameData = await FFmpegVideoService.getFrame(videoId!);
+
+        if (frameData != null) {
+          final width = frameData['width'] as int;
+          final height = frameData['height'] as int;
+          final data = frameData['data'] as Uint8List;
+
+          consecutiveErrors = 0;
+          final timestamp = DateTime.now().millisecondsSinceEpoch;
+          params.sendPort.send(RawFrame(data, width, height, timestamp));
+        } else {
+          consecutiveErrors++;
+          // Increased threshold: FFmpeg takes 3-5 seconds to initialize grabber
+          if (consecutiveErrors > 200) {
+            // ~6.6 seconds at 33ms polls
+            debugPrint("FFmpeg: Too many errors, reconnecting...");
+            await FFmpegVideoService.releaseVideo(videoId!);
+            videoId = null;
+            consecutiveErrors = 0;
+          }
+        }
+      } catch (e) {
+        debugPrint("FFmpeg capture error: $e");
+        consecutiveErrors++;
+        await Future.delayed(const Duration(milliseconds: 50));
+      }
+
+      // Poll at ~30 FPS
+      await Future.delayed(const Duration(milliseconds: 33));
+    }
+  } finally {
+    if (videoId != null) {
+      await FFmpegVideoService.releaseVideo(videoId!);
+    }
+  }
+}
+
+/// Linux: OpenCV video capture via native_onnx
+Future<void> _linuxOpenCVCaptureLoop(IsolateInitParams params) async {
+  debugPrint("🐧 Linux: Starting OpenCV capture");
+
   try {
     await NativeInferenceService().init();
   } catch (e) {
-    debugPrint("❌ Capture Isolate Init Failed: $e");
+    debugPrint("❌ Native Init Failed: $e");
     return;
   }
 
-  // 2. Open Video INSIDE Isolate
   int videoId = 0;
   int consecutiveErrors = 0;
 
@@ -30,8 +148,9 @@ Future<void> _captureLoopAsync(IsolateInitParams params) async {
     final id = NativeInferenceService().videoOpen(params.videoUrl);
     if (id != 0) {
       params.sendPort.send(id);
+      debugPrint("✓ OpenCV: Video opened (id=$id)");
     } else {
-      debugPrint("❌ Failed to open: ${params.videoUrl}");
+      debugPrint("❌ OpenCV: Failed to open");
     }
     return id;
   }
@@ -43,13 +162,10 @@ Future<void> _captureLoopAsync(IsolateInitParams params) async {
   final heightPtr = calloc<Int32>();
 
   try {
-    // Main capture loop - no verbose logging
     while (true) {
-      // Reconnection Logic
       if (videoId == 0) {
         videoId = openVideo();
         if (videoId == 0) {
-          // Wait before retry
           await Future.delayed(const Duration(seconds: 2));
           continue;
         }
@@ -57,15 +173,14 @@ Future<void> _captureLoopAsync(IsolateInitParams params) async {
       }
 
       try {
-        final resultArray = NativeInferenceService().videoGetFrame(
+        final result = NativeInferenceService().videoGetFrame(
           videoId,
           bufferPtrPtr,
           widthPtr,
           heightPtr,
         );
 
-        // 0 = Success
-        if (resultArray == 0) {
+        if (result == 0) {
           consecutiveErrors = 0;
           final w = widthPtr.value;
           final h = heightPtr.value;
@@ -74,42 +189,26 @@ Future<void> _captureLoopAsync(IsolateInitParams params) async {
           if (w > 0 && h > 0 && dataPtr != nullptr) {
             final length = w * h * 4;
             final list = Uint8List.fromList(dataPtr.asTypedList(length));
-            final decodeTimestamp = DateTime.now().millisecondsSinceEpoch;
-            params.sendPort.send(RawFrame(list, w, h, decodeTimestamp));
+            final timestamp = DateTime.now().millisecondsSinceEpoch;
+            params.sendPort.send(RawFrame(list, w, h, timestamp));
           }
         } else {
-          // Handle Error
           consecutiveErrors++;
-
           if (consecutiveErrors > 30) {
-            debugPrint(
-              "Capture Isolate: Too many errors ($consecutiveErrors). Reconnecting video...",
-            );
+            debugPrint("OpenCV: Too many errors, reconnecting...");
             NativeInferenceService().videoRelease(videoId);
-            videoId = 0; // Trigger re-open next loop
+            videoId = 0;
             consecutiveErrors = 0;
-          } else {
-            // Only log occasionally to avoid spam
-            if (consecutiveErrors % 10 == 0) {
-              debugPrint(
-                "Native Video Error for ID $videoId: Code $resultArray (Count: $consecutiveErrors)",
-              );
-            }
-            // No delay for transient errors - fail fast for low latency
           }
         }
       } catch (e) {
-        debugPrint("Capture Isolate inner Error: $e");
+        debugPrint("OpenCV error: $e");
         consecutiveErrors++;
         await Future.delayed(const Duration(milliseconds: 50));
       }
 
-      // No artificial delay - let NVDEC naturally throttle based on stream FPS
-      // This eliminates decode time jitter caused by forced 1ms waits
       await Future.delayed(Duration.zero);
     }
-  } catch (e) {
-    debugPrint("Capture Isolate Error: $e");
   } finally {
     calloc.free(bufferPtrPtr);
     calloc.free(widthPtr);
