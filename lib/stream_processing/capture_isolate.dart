@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:isolate';
 import 'dart:ffi';
 import 'dart:io';
 import 'dart:typed_data';
@@ -34,7 +35,8 @@ Future<void> _androidFFmpegCaptureLoop(IsolateInitParams params) async {
   debugPrint("   URL: ${params.videoUrl}");
 
   int? videoId;
-  int consecutiveErrors = 0;
+  int lastFrameTime =
+      DateTime.now().millisecondsSinceEpoch; // Time-based watchdog
 
   Future<int?> openVideo() async {
     // --- DIAGNOSTIC START ---
@@ -65,14 +67,22 @@ Future<void> _androidFFmpegCaptureLoop(IsolateInitParams params) async {
     // --- DIAGNOSTIC END ---
 
     try {
-      final id = await FFmpegVideoService.openVideo(params.videoUrl);
-      if (id != null) {
-        params.sendPort.send(id);
-        debugPrint("✓ FFmpeg: Video opened (id=$id)");
+      final result = await FFmpegVideoService.openVideo(params.videoUrl);
+      if (result != null) {
+        final streamId = result['videoId'] as int;
+        final textureId = result['textureId'] as int;
+        debugPrint(
+          "Capture: Opened video stream $streamId with texture $textureId",
+        );
+
+        // Send initialization success with texture ID
+        // Protocol: Map { 'videoId': int, 'textureId': int }
+        params.sendPort.send({'videoId': streamId, 'textureId': textureId});
+        return streamId;
       } else {
         debugPrint("❌ FFmpeg: Failed to open video");
+        return null;
       }
-      return id;
     } catch (e) {
       debugPrint("❌ FFmpeg open error: $e");
       return null;
@@ -89,7 +99,6 @@ Future<void> _androidFFmpegCaptureLoop(IsolateInitParams params) async {
           await Future.delayed(const Duration(seconds: 2));
           continue;
         }
-        consecutiveErrors = 0;
       }
 
       try {
@@ -100,28 +109,41 @@ Future<void> _androidFFmpegCaptureLoop(IsolateInitParams params) async {
           final height = frameData['height'] as int;
           final data = frameData['data'] as Uint8List;
 
-          consecutiveErrors = 0;
-          final timestamp = DateTime.now().millisecondsSinceEpoch;
-          params.sendPort.send(RawFrame(data, width, height, timestamp));
+          lastFrameTime =
+              DateTime.now().millisecondsSinceEpoch; // Reset watchdog
+
+          // Use native timestamp for sync
+          final timestamp = frameData['timestamp'] as int;
+
+          // OPTIMIZATION: Use TransferableTypedData to avoid copying data between isolates
+          // Protocol: ['frame', TransferableTypedData, width, height, timestamp]
+          final transferable = TransferableTypedData.fromList([data]);
+          params.sendPort.send([
+            'frame',
+            transferable,
+            width,
+            height,
+            timestamp,
+          ]);
         } else {
-          consecutiveErrors++;
-          // Increased threshold: FFmpeg takes 3-5 seconds to initialize grabber
-          if (consecutiveErrors > 200) {
-            // ~6.6 seconds at 33ms polls
-            debugPrint("FFmpeg: Too many errors, reconnecting...");
+          // No frame available (native buffer empty or not ready)
+          final now = DateTime.now().millisecondsSinceEpoch;
+          // Watchdog: If no frames for 5 seconds, reconnect
+          if (now - lastFrameTime > 5000) {
+            debugPrint("FFmpeg: No frames for 5s (Watchdog), reconnecting...");
             await FFmpegVideoService.releaseVideo(videoId!);
             videoId = null;
-            consecutiveErrors = 0;
+            lastFrameTime = now; // Prevent immediate double-trigger
           }
         }
       } catch (e) {
         debugPrint("FFmpeg capture error: $e");
-        consecutiveErrors++;
         await Future.delayed(const Duration(milliseconds: 50));
       }
 
-      // Poll at ~30 FPS
-      await Future.delayed(const Duration(milliseconds: 33));
+      // Poll frequently (1ms) to pick up frames immediately
+      // Native side is now throttled to 30fps, so we want low-latency pickup
+      await Future.delayed(const Duration(milliseconds: 1));
     }
   } finally {
     if (videoId != null) {

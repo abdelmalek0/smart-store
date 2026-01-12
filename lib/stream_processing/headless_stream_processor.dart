@@ -9,6 +9,7 @@ import 'package:smart_store_linux/models/rtsp_stream.dart';
 import 'package:smart_store_linux/services/inference_service.dart';
 import 'package:smart_store_linux/stream_processing/capture_isolate.dart';
 import 'package:smart_store_linux/stream_processing/isolate_params.dart';
+import 'package:smart_store_linux/services/ffmpeg_video_service.dart';
 
 /// Headless stream processor that manages video capture, inference, and display queues
 ///
@@ -21,15 +22,18 @@ class HeadlessStreamProcessor {
   final RTSPStream stream;
   final String modelPath;
   int _nativeVideoId = 0;
+  int? _textureId;
   bool _isActive = true;
 
   // Freeze mode - stop inference but keep displaying raw frames
   bool _isFrozen = false;
 
   // Queue Configuration - Minimal for memory safety during slow inference
-  // ✓ REDUCED: Prevent memory buildup when inference is slow (was 3/5)
-  static const int INFERENCE_QUEUE_MAX_SIZE = 1; // Only 1 pending frame
-  static const int DISPLAY_QUEUE_MAX_SIZE = 2; // Minimal display buffer
+  // Queue Configuration - Optimized for Smoothness
+  // ✓ INCREASED: Small buffer to absorb jitter between threads
+  static const int INFERENCE_QUEUE_MAX_SIZE = 2; // Buffer 2 frames for jitter
+  static const int DISPLAY_QUEUE_MAX_SIZE =
+      3; // Ensure display always has a frame
 
   // InferenceQueue: Buffers raw frames from capture (max 3)
   // Purpose: Maintain smooth playback even if inference is slower than capture
@@ -44,6 +48,7 @@ class HeadlessStreamProcessor {
 
   Stream<ProcessedFrame> get frameStream => _frameStreamController.stream;
   bool get isInitialized => _nativeVideoId > 0;
+  int? get textureId => _textureId;
   bool get isFrozen => _isFrozen;
 
   // Isolate for frame capture
@@ -129,14 +134,39 @@ class HeadlessStreamProcessor {
       );
 
       _captureReceivePort!.listen((message) {
+        RawFrame? frame;
+
         if (message is RawFrame) {
+          frame = message;
+        } else if (message is List &&
+            message.isNotEmpty &&
+            message[0] == 'frame') {
+          // Handle TransferableTypedData Optimization
+          final transferable = message[1] as TransferableTypedData;
+          final width = message[2] as int;
+          final height = message[3] as int;
+          final timestamp = message[4] as int;
+
+          final bytes = transferable.materialize().asUint8List();
+          frame = RawFrame(bytes, width, height, timestamp);
+          _captureCount++; // Track capture count (moved here)
+        }
+
+        if (frame != null) {
           // Add to InferenceQueue (max size 2)
           // Always keep the latest frames, drop oldest if full
           if (_inferenceQueue.length >= INFERENCE_QUEUE_MAX_SIZE) {
             _inferenceQueue.removeFirst(); // Drop oldest
           }
-          _inferenceQueue.add(message);
+          _inferenceQueue.add(frame);
+        } else if (message is Map && message.containsKey('videoId')) {
+          _nativeVideoId = message['videoId'] as int;
+          _textureId = message['textureId'] as int;
+          debugPrint(
+            "Stream Processor: Initialized with Texture ID $_textureId",
+          );
         } else if (message is int) {
+          // Legacy/Fallback
           _nativeVideoId = message;
         } else {
           debugPrint("Main: Received unknown message from isolate: $message");
@@ -199,10 +229,43 @@ class HeadlessStreamProcessor {
     }
   }
 
+  // --- Performance Tracking ---
+  int _captureCount = 0;
+  int _displayCount = 0;
+  Timer? _perfTimer;
+
+  void _startPerfLogging() {
+    _perfTimer?.cancel();
+    _perfTimer = Timer.periodic(const Duration(seconds: 2), (timer) {
+      if (!_isActive) {
+        timer.cancel();
+        return;
+      }
+      final captureFps = (_captureCount / 2).toStringAsFixed(1);
+      final inferenceFps = (_inferenceFrameCounter / 2).toStringAsFixed(1);
+      final displayFps = (_displayCount / 2).toStringAsFixed(1);
+
+      debugPrint(
+        "📊 Stats [${stream.id}]: "
+        "Capture: ${captureFps}fps | "
+        "Inference: ${inferenceFps}fps | "
+        "Display: ${displayFps}fps | "
+        "Pending: $_pendingInferenceCount",
+      );
+
+      _captureCount = 0;
+      _inferenceFrameCounter = 0;
+      _displayCount = 0;
+    });
+  }
+
   /// Display loop: Sequentially display frames from DisplayQueue or InferenceQueue
   /// When frozen (stopped): Display raw frames from InferenceQueue (no inference)
   /// When running: Display ONLY processed frames from DisplayQueue (with matching detections)
   void _startDisplayLoop() async {
+    // Start performance logging
+    _startPerfLogging();
+
     while (_isActive) {
       ProcessedFrame? frameToDisplay;
 
@@ -234,6 +297,7 @@ class HeadlessStreamProcessor {
         // Send to display stream
         if (frameToDisplay != null && !_frameStreamController.isClosed) {
           _frameStreamController.add(frameToDisplay);
+          _displayCount++; // Track display count
         }
       } catch (e) {
         debugPrint("SPM: Error in display loop: $e");
@@ -248,6 +312,7 @@ class HeadlessStreamProcessor {
         await Future.delayed(const Duration(milliseconds: 8));
       }
     }
+    _perfTimer?.cancel();
   }
 
   /// Freeze processor - stop inference but keep displaying raw frames
@@ -308,6 +373,12 @@ class HeadlessStreamProcessor {
         });
 
     debugPrint("Processor unfrozen for ${stream.id} - inference restarted");
+  }
+
+  Future<void> showFrame(int timestamp) async {
+    if (_nativeVideoId > 0) {
+      await FFmpegVideoService.showFrame(_nativeVideoId, timestamp);
+    }
   }
 
   /// Dispose the processor and release all resources

@@ -27,14 +27,14 @@ class DetachedStreamPlayer extends StatefulWidget {
 class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
   bool _isActive = true;
 
-  // Display state - no internal queue, processor manages queues
+  // Display state
+  int? _textureId;
   ui.Image? _currentImage;
   List<dynamic> _currentDetections = [];
   int _currentWidth = 0;
   int _currentHeight = 0;
 
   // Stats
-  double _pipelineFPS = 0.0;
   int _decodeMs = 0;
   int _inferenceMs = 0;
   int _postprocessMs = 0;
@@ -46,8 +46,10 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
   ProcessedFrame? _pendingFrame;
 
   // Track frames for averaging FPS
-  List<double> _recentFPS = [];
-  static const int FPS_SAMPLE_SIZE = 10;
+  // Stabilized FPS - Rolling Window (last 30 frames)
+  final List<int> _frameTimestamps = [];
+  static const int FPS_WINDOW_SIZE = 30;
+  double _fps = 0.0;
 
   @override
   void initState() {
@@ -67,10 +69,55 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
       if (externalProcessor != null && externalProcessor.isInitialized) {
         debugPrint("Attached to processor for ${widget.streamId}");
 
-        // Listen to processed frames from processor's DisplayQueue
+        // Check for Texture Mode
+        if (externalProcessor.textureId != null) {
+          setState(() {
+            _textureId = externalProcessor.textureId;
+            // Native resolution is 320x180 now
+            _currentWidth = 320;
+            _currentHeight = 180;
+          });
+        }
+
+        // Listen to processed frames (for Detections & FPS stats)
         _frameSubscription = externalProcessor.frameStream.listen((frame) {
           if (!mounted || !_isActive) return;
 
+          // TEXTURE MODE: Synchronized Display (Render-on-Demand)
+          if (_textureId != null) {
+            // 1. Trigger Native Display of the EXACT frame used for this inference
+            externalProcessor.showFrame(
+              frame.decodeStartMs,
+            ); // decodeStartMs IS the native timestamp
+
+            // 2. Update UI Overlay immediately
+            setState(() {
+              _currentDetections = frame.detections;
+              _currentWidth = frame.width;
+              _currentHeight = frame.height;
+
+              final timing = frame.timingBreakdown;
+              _decodeMs = timing['decode'] ?? 0;
+              _inferenceMs = timing['inference'] ?? 0;
+              _postprocessMs = timing['postprocess'] ?? 0;
+
+              // FPS Calculation (Based on display updates)
+              final now = DateTime.now().millisecondsSinceEpoch;
+              _frameTimestamps.add(now);
+              if (_frameTimestamps.length > FPS_WINDOW_SIZE) {
+                _frameTimestamps.removeAt(0);
+              }
+              if (_frameTimestamps.length >= 2) {
+                final duration = _frameTimestamps.last - _frameTimestamps.first;
+                if (duration > 0) {
+                  _fps = ((_frameTimestamps.length - 1) * 1000) / duration;
+                }
+              }
+            });
+            return;
+          }
+
+          // LEGACY MODE: Image Decoding (Slow Path)
           // Frame rate limiting: If we're already decoding, save this as pending
           // This prevents the UI thread from being overwhelmed with decode requests
           if (_isDecodingFrame) {
@@ -86,15 +133,17 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
     }
   }
 
+  /// PROCESSED FRAME HANDLER (Legacy / Fallback)
   /// Decode and display a frame with proper UI thread management and FPS calculation
   void _decodeAndDisplayFrame(ProcessedFrame frame) {
     if (!mounted || !_isActive) return;
 
     _isDecodingFrame = true;
 
-    // Extract pipeline FPS and timing from frame timestamps
-    final frameFPS = frame.pipelineFPS;
+    // Extract timing
     final timing = frame.timingBreakdown;
+
+    final decodeStart = DateTime.now().millisecondsSinceEpoch;
 
     // Schedule frame decoding after current frame to avoid blocking during build
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -104,6 +153,11 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
       }
 
       try {
+        // Verify resolution (Native changes require full rebuild)
+        if (_frameTimestamps.length % 60 == 0) {
+          debugPrint("Frame Size: ${frame.width}x${frame.height}");
+        }
+
         ui.decodeImageFromPixels(
           frame.imageBytes,
           frame.width,
@@ -116,6 +170,32 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
               return;
             }
 
+            final decodeDuration =
+                DateTime.now().millisecondsSinceEpoch - decodeStart;
+            // Only log if slow (> 30ms) to avoid flood
+            if (decodeDuration > 30) {
+              debugPrint("⚠️ UI Decode Slow: ${decodeDuration}ms");
+            }
+
+            // Calculate Stable FPS (Rolling Average)
+            final now = DateTime.now().millisecondsSinceEpoch;
+            _frameTimestamps.add(now);
+
+            // Keep only the last N timestamps
+            if (_frameTimestamps.length > FPS_WINDOW_SIZE) {
+              _frameTimestamps.removeAt(0); // Remove oldest
+            }
+
+            // Calculate FPS over the whole window
+            if (_frameTimestamps.length >= 2) {
+              final durationMs = _frameTimestamps.last - _frameTimestamps.first;
+              if (durationMs > 0) {
+                // FPS = (Frames - 1) / DurationSeconds
+                // Frames including the first one, but intervals are (Frames - 1)
+                _fps = ((_frameTimestamps.length - 1) * 1000) / durationMs;
+              }
+            }
+
             // Update state with decoded image and FPS stats
             setState(() {
               _currentImage?.dispose();
@@ -123,14 +203,6 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
               _currentDetections = frame.detections;
               _currentWidth = frame.width;
               _currentHeight = frame.height;
-
-              // Update FPS with moving average for stability
-              _recentFPS.add(frameFPS);
-              if (_recentFPS.length > FPS_SAMPLE_SIZE) {
-                _recentFPS.removeAt(0);
-              }
-              _pipelineFPS =
-                  _recentFPS.reduce((a, b) => a + b) / _recentFPS.length;
 
               // Update timing breakdown
               _decodeMs = timing['decode'] ?? 0;
@@ -144,7 +216,8 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
             if (_pendingFrame != null) {
               final pending = _pendingFrame!;
               _pendingFrame = null;
-              _decodeAndDisplayFrame(pending);
+              // Schedule next decode immediately on microtask to separate stack
+              Future.microtask(() => _decodeAndDisplayFrame(pending));
             }
           },
         );
@@ -182,8 +255,38 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
       child: Stack(
         fit: StackFit.passthrough,
         children: [
-          // 1. Image Layer (from Native Capture)
-          if (_currentImage != null)
+          // 1. VIDEO LAYER
+          if (_textureId != null)
+            // TEXTURE PATH (Zero-Copy)
+            Container(
+              color: Colors.black,
+              child: Center(
+                child: AspectRatio(
+                  aspectRatio: _currentWidth > 0
+                      ? _currentWidth / _currentHeight
+                      : 16 / 9,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      Texture(textureId: _textureId!),
+                      // Detections Overlay
+                      if (_currentDetections.isNotEmpty)
+                        CustomPaint(
+                          painter: DetectionOverlayPainter(
+                            detections: _currentDetections,
+                            originalSize: Size(
+                              _currentWidth.toDouble(),
+                              _currentHeight.toDouble(),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            )
+          else if (_currentImage != null)
+            // LEGACY PATH (Bitmap)
             Container(
               color: Colors.black,
               child: Center(
@@ -208,60 +311,58 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
                   ),
                 ),
               ),
-            ),
-
-          if (_currentImage == null)
+            )
+          else
             const Center(
               child: CircularProgressIndicator(color: AppTheme.accent),
             ),
 
-          // Overlay Info
+          // Overlay Info - LARGE FPS for Release Mode
           Positioned(
-            top: 10,
-            left: 10,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.7),
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (widget.label != null)
-                    Text(
-                      widget.label!,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 12,
+            top: 20,
+            left: 20,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Display FPS (Big)
+                Text(
+                  "FPS: ${_fps.toStringAsFixed(1)}",
+                  style: const TextStyle(
+                    color: Colors.greenAccent,
+                    fontSize: 42,
+                    fontWeight: FontWeight.bold,
+                    shadows: [
+                      Shadow(
+                        offset: Offset(2, 2),
+                        blurRadius: 4,
+                        color: Colors.black,
                       ),
-                    ),
-                  Text(
-                    "FPS: ${_pipelineFPS.toStringAsFixed(1)}",
-                    style: const TextStyle(
-                      color: Colors.greenAccent,
-                      fontSize: 10,
-                      fontFamily: 'monospace',
-                      fontWeight: FontWeight.bold,
-                    ),
+                    ],
                   ),
-                  if (_decodeMs > 0 || _inferenceMs > 0)
-                    Text(
-                      "D:${_decodeMs}ms I:${_inferenceMs}ms",
-                      style: TextStyle(
-                        color: Colors.grey[400],
-                        fontSize: 8,
-                        fontFamily: 'monospace',
-                      ),
-                    ),
-                  if (widget.modelPath != null)
-                    const Text(
-                      "AI: ON",
-                      style: TextStyle(color: Colors.blueAccent, fontSize: 10),
-                    ),
-                ],
-              ),
+                ),
+                // Pipeline Stats (Smaller)
+                Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.6),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (_decodeMs > 0 || _inferenceMs > 0)
+                        Text(
+                          "D:${_decodeMs}ms I:${_inferenceMs}ms P:${_postprocessMs}ms",
+                          style: TextStyle(
+                            color: Colors.grey[300],
+                            fontSize: 12,
+                            fontFamily: 'monospace',
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -358,17 +459,6 @@ class DetectionOverlayPainter extends CustomPainter {
         double screenX2 = (x2 * scale) + offsetX;
         double screenY2 = (y2 * scale) + offsetY;
 
-        // Debug: Print first detection
-        if (detections.indexOf(det) == 0) {
-          print(
-            'DART RENDER: original=(${x1.toInt()},${y1.toInt()},${x2.toInt()},${y2.toInt()}) '
-            'originalSize=${originalSize.width.toInt()}x${originalSize.height.toInt()} '
-            'canvasSize=${size.width.toInt()}x${size.height.toInt()} '
-            'scale=$scale offset=($offsetX,$offsetY) '
-            'screen=(${screenX1.toInt()},${screenY1.toInt()},${screenX2.toInt()},${screenY2.toInt()})',
-          );
-        }
-
         // Draw bounding box
         canvas.drawRect(
           Rect.fromLTRB(screenX1, screenY1, screenX2, screenY2),
@@ -410,7 +500,8 @@ class DetectionOverlayPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) {
-    return true;
+  bool shouldRepaint(covariant DetectionOverlayPainter oldDelegate) {
+    return oldDelegate.detections != detections ||
+        oldDelegate.originalSize != originalSize;
   }
 }
