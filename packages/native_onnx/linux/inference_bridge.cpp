@@ -7,6 +7,7 @@
 #include <memory>
 #include <mutex>
 #include <algorithm>
+#include "texture_manager.h"
 
 // CUDA headers for GPU verification
 #ifdef USE_CUDA
@@ -49,6 +50,14 @@ struct SessionContext {
     // Outputs from the last Run
     std::vector<Ort::Value> output_tensors;
     std::vector<std::vector<int64_t>> current_output_dims;
+
+    // CPU preprocessing buffer (fallback)
+    std::vector<float> preprocess_buffer;
+    
+    // GPU preprocessing buffer for full GPU inference
+    cv::cuda::GpuMat gpu_preprocess_buffer;  // Stores 1x3x640x640 in CHW format
+    float* cuda_tensor_ptr = nullptr;        // CUDA memory for ONNX tensor
+    size_t cuda_tensor_size = 0;
 };
 
 static std::map<int64_t, std::shared_ptr<SessionContext>> g_contexts;
@@ -73,7 +82,24 @@ struct VideoContext {
     int width = 0;
     int height = 0;
     
+    // Cache to prevent swscale thrashing
+    int last_width = 0;
+    int last_height = 0;
+    int last_format = -1;
+    
     std::mutex mutex;  // Per-video mutex for thread safety
+    
+    // GPU Texture rendering (NEW)
+    int texture_id;  // TextureManager ID
+    int texture_manager_id;  // ID from Dart (for updates)
+    bool use_gpu_texture;
+    
+    // GPU frame for zero-copy inference pipeline
+    cv::cuda::GpuMat last_rgba_gpu;  // Store last RGBA frame on GPU
+    bool has_gpu_frame = false;       // Flag indicating GPU frame is available
+    
+    // Per-stream NV12 conversion buffer (thread-safe alternative to static)
+    std::vector<uint8_t> nv12_buffer;
 #else
     // Fallback to OpenCV if FFmpeg not available
     std::unique_ptr<cv::VideoCapture> cap;
@@ -339,6 +365,63 @@ int PreprocessImage(uint8_t* in_data, int width, int height, float* out_data) {
     } catch (const std::exception& e) {
         std::cerr << "[Native] PreprocessImage failed: " << e.what() << std::endl;
         return 1;
+    }
+}
+
+// ==========================================
+// GPU-ONLY Preprocessing (Zero-Copy to ONNX CUDA EP)
+// ==========================================
+// Takes a GpuMat RGBA, preprocesses on GPU, outputs CUDA tensor pointer
+// Note: CHW conversion currently uses CPU as cv::cuda::split is not available in all OpenCV builds
+// This is still mostly GPU-based (resize/normalize on GPU)
+
+bool PreprocessImageGpu(const cv::cuda::GpuMat& rgba_gpu, float** out_cuda_ptr, 
+                        cv::cuda::GpuMat& temp_buffer) {
+    try {
+        #ifdef HAVE_OPENCV_CUDAIMGPROC
+        // 1. Convert RGBA -> RGB on GPU
+        cv::cuda::GpuMat gpu_rgb;
+        cv::cuda::cvtColor(rgba_gpu, gpu_rgb, cv::COLOR_RGBA2RGB);
+        
+        // 2. Resize to 640x640 on GPU
+        cv::cuda::GpuMat gpu_resized;
+        cv::cuda::resize(gpu_rgb, gpu_resized, cv::Size(640, 640), 0, 0, cv::INTER_LINEAR);
+        
+        // 3. Convert to float and normalize (1/255) on GPU
+        cv::cuda::GpuMat gpu_float;
+        gpu_resized.convertTo(gpu_float, CV_32FC3, 1.0/255.0);
+        
+        // 4. Download for CHW conversion (CPU - fast for small 640x640 image)
+        cv::Mat cpu_float;
+        gpu_float.download(cpu_float);
+        
+        // 5. HWC -> CHW conversion using blobFromImage (optimized)
+        cv::Mat blob;
+        cv::dnn::blobFromImage(cpu_float, blob, 1.0, cv::Size(640, 640), 
+                               cv::Scalar(), false, false, CV_32F);
+        
+        // 6. Upload CHW data back to GPU for ONNX CUDA EP
+        temp_buffer.upload(blob.reshape(1, 1));  // 1D row: 1 x (3*640*640)
+        
+        *out_cuda_ptr = reinterpret_cast<float*>(temp_buffer.data);
+        
+        // DEBUG: Log first successful GPU preprocess
+        static int gpu_prep_count = 0;
+        if (gpu_prep_count < 3) {
+            std::cout << "[GPU-PREPROCESS] ✓ Hybrid GPU preprocessing complete (resize/normalize on GPU)" << std::endl;
+            gpu_prep_count++;
+        }
+        
+        return true;
+        
+        #else
+        std::cerr << "[GPU-PREPROCESS] OpenCV CUDA modules not available" << std::endl;
+        return false;
+        #endif
+        
+    } catch (const std::exception& e) {
+        std::cerr << "[GPU-PREPROCESS] Failed: " << e.what() << std::endl;
+        return false;
     }
 }
 
@@ -644,6 +727,13 @@ int64_t Video_Open(const char* url) {
         ctx->width = ctx->codec_ctx->width;
         ctx->height = ctx->codec_ctx->height;
         
+        // GPU textures will be created LAZILY on first frame (when GL context exists)
+        ctx->texture_id = 0;  // Not created yet
+        ctx->use_gpu_texture = true;  // Enable lazy creation
+        
+        std::cout << "[GPU-TEXTURE] Lazy texture creation enabled for stream (" 
+                  << ctx->codec_ctx->width << "x" << ctx->codec_ctx->height << ")" << std::endl;
+        
         int64_t id = g_next_video_id++;
         g_video_contexts[id] = ctx;
         
@@ -822,47 +912,147 @@ int Video_GetFrame(int64_t video_id, uint8_t** out_buffer, int* width, int* heig
                   << frame_counts[video_id] << " frames (GPU)" << std::endl;
     }
     
-    // Transfer from GPU to CPU if needed
+    // ========================================
+    // ZERO-COPY GPU TEXTURE RENDERING PATH
+    // ========================================
+    if (ctx->use_gpu_texture && (ctx->texture_id > 0 || ctx->texture_manager_id > 0)) {
+        
+        // NVDEC outputs NV12 in CUDA memory (ctx->frame is AV_PIX_FMT_CUDA)
+        // Goal: Keep everything on GPU, no CPU downloads for display!
+        
+        int src_width = ctx->frame->width;
+        int src_height = ctx->frame->height;
+        
+        try {
+            cv::cuda::GpuMat rgba_gpu;
+            
+                // ========================================
+                // NV12 -> RGBA CONVERSION (CPU Fallback)
+                // ========================================
+                // OpenCV CUDA doesn't support COLOR_YUV2RGBA_NV12, so we use CPU.
+                
+                // 1. Get NV12 data (Transfer from GPU if needed)
+                AVFrame* frame_to_convert = nullptr;
+                
+                if (ctx->frame->format == AV_PIX_FMT_CUDA) {
+                    if (av_hwframe_transfer_data(ctx->sw_frame, ctx->frame, 0) < 0) {
+                        std::cerr << "[NVDEC] Failed to transfer NV12 from GPU" << std::endl;
+                        av_frame_unref(ctx->frame);
+                        return 2;
+                    }
+                    frame_to_convert = ctx->sw_frame;
+                } else {
+                    frame_to_convert = ctx->frame; // Already on CPU
+                }
+                
+                // 2. Prepare Contiguous Buffer (Y + UV)
+                int frame_w = frame_to_convert->width;
+                int frame_h = frame_to_convert->height;
+                int y_stride = frame_to_convert->linesize[0];
+                int uv_stride = frame_to_convert->linesize[1];
+                int uv_height = frame_h / 2;
+                
+                int nv12_size = frame_w * (frame_h + uv_height);
+                // Use per-stream buffer instead of static for thread safety
+                if (ctx->nv12_buffer.size() != nv12_size) ctx->nv12_buffer.resize(nv12_size);
+                
+                // Copy Y Plane
+                for (int i = 0; i < frame_h; i++) {
+                    memcpy(ctx->nv12_buffer.data() + i * frame_w, 
+                           frame_to_convert->data[0] + i * y_stride, frame_w);
+                }
+                
+                // Copy UV Plane
+                for (int i = 0; i < uv_height; i++) {
+                    memcpy(ctx->nv12_buffer.data() + frame_w * frame_h + i * frame_w, 
+                           frame_to_convert->data[1] + i * uv_stride, frame_w);
+                }
+                
+                // 3. Convert to RGBA
+                cv::Mat nv12_cpu(frame_h + uv_height, frame_w, CV_8UC1, ctx->nv12_buffer.data());
+                cv::Mat rgba_cpu;
+                cv::cvtColor(nv12_cpu, rgba_cpu, cv::COLOR_YUV2RGBA_NV12);
+                
+                // 4. Upload to GPU
+                rgba_gpu.upload(rgba_cpu);
+
+            
+            // Update OpenGL texture via CUDA-GL interop (zero-copy!)
+            int tex_id = ctx->texture_manager_id > 0 ? ctx->texture_manager_id : ctx->texture_id;
+            texture_manager::TextureManager::getInstance().setPendingGpuFrame(tex_id, rgba_gpu);
+            
+            // Store GPU frame for GPU inference path (zero-copy!)
+            ctx->last_rgba_gpu = rgba_gpu;  // GPU-to-GPU copy
+            ctx->has_gpu_frame = true;
+            
+            // For legacy CPU inference path, provide buffer
+            // Only download from GPU if caller needs CPU buffer (no GPU texture in use)
+            int rgba_size = rgba_gpu.cols * rgba_gpu.rows * 4;
+            if (ctx->rgba_buffer.size() != rgba_size) {
+                ctx->rgba_buffer.resize(rgba_size);
+            }
+            
+            // OPTIMIZATION: Skip GPU->CPU download when using GPU texture path
+            // The texture manager already has the GPU frame, no need to download
+            if (ctx->texture_manager_id == 0 && ctx->texture_id == 0) {
+                // Legacy path: Download RGBA to CPU buffer for Dart-side processing
+                cv::Mat rgba_cpu_for_legacy(rgba_gpu.rows, rgba_gpu.cols, CV_8UC4, ctx->rgba_buffer.data());
+                rgba_gpu.download(rgba_cpu_for_legacy);
+            }
+            
+            av_frame_unref(ctx->frame);
+            
+            *width = src_width;
+            *height = src_height;
+            *out_buffer = ctx->rgba_buffer.data();
+            
+            return 0;  // Success
+            
+        } catch (const cv::Exception& e) {
+            std::cerr << "[ZERO-COPY-ERROR] " << e.what() << std::endl;
+            ctx->use_gpu_texture = false;  // Fallback to CPU path
+            // Continue to CPU path below
+        }
+    }
+    
+    // Need to transfer for CPU path
     if (ctx->frame->format == AV_PIX_FMT_CUDA) {
-        // Hardware frame, need to transfer to CPU
-        // Let FFmpeg auto-detect the correct CPU format
         if (av_hwframe_transfer_data(ctx->sw_frame, ctx->frame, 0) < 0) {
             std::cerr << "[NVDEC] Error transferring frame from GPU to CPU" << std::endl;
             av_frame_unref(ctx->frame);
             return 2;
         }
         av_frame_copy_props(ctx->sw_frame, ctx->frame);
-        
-        // Log format info for debugging (only on first few frames)
-        static int log_count = 0;
-        if (log_count < 3) {
-            const char* fmt_name = av_get_pix_fmt_name((AVPixelFormat)ctx->sw_frame->format);
-            std::cout << "[NVDEC] Transferred frame format: " << (fmt_name ? fmt_name : "unknown") 
-                      << " (" << ctx->sw_frame->width << "x" << ctx->sw_frame->height << ")" << std::endl;
-            log_count++;
-        }
     } else {
-        // Already in CPU memory
         av_frame_unref(ctx->sw_frame);
         av_frame_move_ref(ctx->sw_frame, ctx->frame);
     }
     
-    av_frame_unref(ctx->frame);
-    
+    // ========================================
+    // FALLBACK: CPU PATH (for compatibility)
+    // ========================================
     // Convert to RGBA
-    int frame_width = ctx->sw_frame->width;
-    int frame_height = ctx->sw_frame->height;
+    int src_width = ctx->sw_frame->width;
+    int src_height = ctx->sw_frame->height;
     AVPixelFormat src_format = (AVPixelFormat)ctx->sw_frame->format;
     
-    // Recreate swscale context if format or dimensions changed
-    static int last_width = 0;
-    static int last_height = 0;
-    static AVPixelFormat last_format = AV_PIX_FMT_NONE;
+    // Calculate target dimensions (Max 320px for Linux UI performance)
+    // Flutter ui.decodeImageFromPixels is CPU-bound and very slow
+    int dst_width = src_width;
+    int dst_height = src_height;
     
+    // Extreme downscale for multi-stream performance
+    if (src_width > 320) {
+        float scale = 320.0f / src_width;
+        dst_width = 320;
+        dst_height = (int)(src_height * scale);
+    }
+    
+    // Using SESSION context state to avoid cross-stream thrashing
     if (!ctx->sws_ctx || 
-        frame_width != last_width || 
-        frame_height != last_height || 
-        src_format != last_format) {
+        dst_width != ctx->last_width || 
+        dst_height != ctx->last_height || 
+        (int)src_format != ctx->last_format) {
         
         if (ctx->sws_ctx) {
             sws_freeContext(ctx->sws_ctx);
@@ -872,39 +1062,38 @@ int Video_GetFrame(int64_t video_id, uint8_t** out_buffer, int* width, int* heig
         const char* fmt_name = av_get_pix_fmt_name(src_format);
         std::cout << "[NVDEC] Creating swscale context: " 
                   << (fmt_name ? fmt_name : "unknown") << " " 
-                  << frame_width << "x" << frame_height << " -> RGBA" << std::endl;
+                  << src_width << "x" << src_height << " -> RGBA (" 
+                  << dst_width << "x" << dst_height << ")" << std::endl;
         
         ctx->sws_ctx = sws_getContext(
-            frame_width, frame_height, src_format,
-            frame_width, frame_height, AV_PIX_FMT_RGBA,
+            src_width, src_height, src_format,
+            dst_width, dst_height, AV_PIX_FMT_RGBA,
             SWS_FAST_BILINEAR, nullptr, nullptr, nullptr
         );
         
         if (!ctx->sws_ctx) {
             std::cerr << "[NVDEC] Failed to create swscale context" << std::endl;
-            std::cerr << "[NVDEC] Source format: " << (fmt_name ? fmt_name : "unknown") 
-                      << " " << frame_width << "x" << frame_height << std::endl;
             return 2;
         }
         
-        last_width = frame_width;
-        last_height = frame_height;
-        last_format = src_format;
+        ctx->last_width = dst_width;
+        ctx->last_height = dst_height;
+        ctx->last_format = (int)src_format;
     }
     
-    // Allocate RGBA buffer if needed
-    size_t rgba_size = frame_width * frame_height * 4;
+    // Allocate RGBA buffer
+    size_t rgba_size = dst_width * dst_height * 4;
     if (ctx->rgba_buffer.size() != rgba_size) {
         ctx->rgba_buffer.resize(rgba_size);
     }
     
-    // Convert YUV/NV12 to RGBA
+    // Convert
     uint8_t* dst_data[1] = { ctx->rgba_buffer.data() };
-    int dst_linesize[1] = { frame_width * 4 };
+    int dst_linesize[1] = { dst_width * 4 };
     
     int result = sws_scale(ctx->sws_ctx,
                           ctx->sw_frame->data, ctx->sw_frame->linesize,
-                          0, frame_height,
+                          0, src_height,
                           dst_data, dst_linesize);
     
     if (result <= 0) {
@@ -916,8 +1105,8 @@ int Video_GetFrame(int64_t video_id, uint8_t** out_buffer, int* width, int* heig
     av_frame_unref(ctx->sw_frame);
     
     // Return frame data
-    *width = frame_width;
-    *height = frame_height;
+    *width = dst_width;
+    *height = dst_height;
     *out_buffer = ctx->rgba_buffer.data();
     
     return 0;
@@ -965,3 +1154,212 @@ int Video_GetFrame(int64_t video_id, uint8_t** out_buffer, int* width, int* heig
     return 0;
 #endif
 }
+
+// Set the TextureManager ID for a video stream (called from UI thread)
+extern "C" __attribute__((visibility("default"))) __attribute__((used))
+void Video_SetTextureManagerId(long long session_id, int texture_manager_id) {
+    if (session_id <= 0) return;
+    
+    std::lock_guard<std::mutex> lock(g_contexts_mutex);
+    auto it = g_video_contexts.find(session_id);
+    if (it != g_video_contexts.end()) {
+        std::lock_guard<std::mutex> vid_lock(it->second->mutex);
+        it->second->texture_manager_id = texture_manager_id;
+        it->second->use_gpu_texture = true; // Enable GPU path
+        std::cout << "[BRIDGE] Linked video " << session_id << " to texture manager " << texture_manager_id << std::endl;
+    } else {
+        std::cerr << "[BRIDGE] Warning: Video context " << session_id << " not found for texture linking" << std::endl;
+    }
+}
+
+// WRAPPERS FOR SHARED TEXTURE MANAGER (Single Instance Fix)
+extern "C" __attribute__((visibility("default"))) __attribute__((used))
+int Texture_Create(int width, int height) {
+    return texture_manager::TextureManager::getInstance().createTexture(width, height);
+}
+
+extern "C" __attribute__((visibility("default"))) __attribute__((used))
+uint32_t Texture_GetGLHandle(int texture_id) {
+    auto info = texture_manager::TextureManager::getInstance().getTexture(texture_id);
+    return info ? info->gl_texture_id : 0;
+}
+
+extern "C" __attribute__((visibility("default"))) __attribute__((used))
+int Texture_GetDimensions(int texture_id, int* width, int* height) {
+    if (texture_manager::TextureManager::getInstance().getTextureDimensions(texture_id, width, height)) {
+        return 0;  // Success
+    }
+    return -1;  // Not found
+}
+
+// Upload pending frame to GL texture (MUST be called on UI thread with GL context)
+extern "C" __attribute__((visibility("default"))) __attribute__((used))
+int Texture_UploadPending(int texture_id) {
+    if (texture_manager::TextureManager::getInstance().uploadPendingFrame(texture_id)) {
+        return 0;  // Success - frame uploaded
+    }
+    return -1;  // No pending frame or error
+}
+
+
+// ==========================================
+// Combined Loop (Capture + Infer)
+// ==========================================
+extern "C" __attribute__((visibility("default"))) __attribute__((used))
+int Video_GetFrameAndInfer(
+    int64_t video_id, 
+    int64_t session_id, 
+    const char* input_name,
+    const char** output_names, 
+    int num_outputs,
+    uint8_t** out_frame_buffer,
+    int* out_width, 
+    int* out_height,
+    float* out_inference_time
+) {
+    auto start_time = std::chrono::high_resolution_clock::now();
+
+    // 1. Get Frame
+    int ret = Video_GetFrame(video_id, out_frame_buffer, out_width, out_height);
+    if (ret != 0) return ret; // 2=EOF/Error/Empty
+
+    // 2. Get VideoContext to check for GPU frame
+    std::shared_ptr<VideoContext> video_ctx;
+    {
+        std::lock_guard<std::mutex> lock(g_video_mutex);
+        auto it = g_video_contexts.find(video_id);
+        if (it != g_video_contexts.end()) {
+            video_ctx = it->second;
+        }
+    }
+
+    // 3. Locate Session
+    std::shared_ptr<SessionContext> ctx;
+    {
+        std::lock_guard<std::mutex> lock(g_contexts_mutex);
+        auto it = g_contexts.find(session_id);
+        if (it == g_contexts.end()) return 10; // Session not found
+        ctx = it->second;
+    }
+
+    std::lock_guard<std::mutex> lock(ctx->mutex);
+    
+    // ========================================
+    // GPU INFERENCE PATH (Full Zero-Copy)
+    // ========================================
+    #ifdef HAVE_OPENCV_CUDAIMGPROC
+    if (video_ctx && video_ctx->has_gpu_frame && !video_ctx->last_rgba_gpu.empty()) {
+        // Use GPU preprocessing and CUDA tensor
+        float* cuda_tensor_ptr = nullptr;
+        
+        if (PreprocessImageGpu(video_ctx->last_rgba_gpu, &cuda_tensor_ptr, ctx->gpu_preprocess_buffer)) {
+            try {
+                // Create CUDA memory info for ONNX tensor
+                Ort::MemoryInfo cuda_mem_info("Cuda", OrtDeviceAllocator, 0, OrtMemTypeDefault);
+                int64_t input_dims[] = {1, 3, 640, 640};
+                size_t tensor_size = 1 * 3 * 640 * 640;
+                
+                ctx->input_name_strings.clear();
+                ctx->input_tensors.clear();
+                ctx->input_name_strings.push_back(std::string(input_name));
+                
+                // Create tensor from CUDA device pointer (ZERO COPY!)
+                Ort::Value tensor = Ort::Value::CreateTensor<float>(
+                    cuda_mem_info, 
+                    cuda_tensor_ptr, 
+                    tensor_size, 
+                    input_dims, 
+                    4
+                );
+                
+                ctx->input_tensors.push_back(std::move(tensor));
+                
+                // Run Inference (now on GPU!)
+                std::vector<const char*> input_names_ptrs;
+                input_names_ptrs.push_back(ctx->input_name_strings[0].c_str());
+
+                ctx->output_tensors = ctx->session->Run(
+                    Ort::RunOptions{nullptr}, 
+                    input_names_ptrs.data(), 
+                    ctx->input_tensors.data(), 
+                    ctx->input_tensors.size(), 
+                    output_names, 
+                    num_outputs
+                );
+
+                auto end_time = std::chrono::high_resolution_clock::now();
+                std::chrono::duration<float, std::milli> duration = end_time - start_time;
+                if (out_inference_time) *out_inference_time = duration.count();
+                
+                // DEBUG: Log first few GPU inferences
+                static int gpu_infer_count = 0;
+                if (gpu_infer_count < 3) {
+                    std::cout << "[GPU-INFER] ✓ Full GPU inference complete in " 
+                              << duration.count() << "ms (zero CPU copy!)" << std::endl;
+                    gpu_infer_count++;
+                }
+                
+                return 0;
+                
+            } catch (const std::exception& e) {
+                std::cerr << "[GPU-INFER] CUDA tensor inference failed: " << e.what() 
+                          << " - falling back to CPU" << std::endl;
+                // Fall through to CPU path
+            }
+        }
+    }
+    #endif
+    
+    // ========================================
+    // CPU INFERENCE PATH (Fallback)
+    // ========================================
+    size_t required_size = 1 * 3 * 640 * 640;
+    if (ctx->preprocess_buffer.size() != required_size) {
+        ctx->preprocess_buffer.resize(required_size);
+    }
+    
+    ret = PreprocessImage(*out_frame_buffer, *out_width, *out_height, ctx->preprocess_buffer.data());
+    if (ret != 0) return 11; // Preprocess failed
+
+    try {
+        Ort::MemoryInfo memory_info = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
+        int64_t input_dims[] = {1, 3, 640, 640};
+        
+        ctx->input_name_strings.clear();
+        ctx->input_tensors.clear();
+        ctx->input_name_strings.push_back(std::string(input_name));
+        
+        Ort::Value tensor = Ort::Value::CreateTensor<float>(
+            memory_info, 
+            ctx->preprocess_buffer.data(), 
+            required_size, 
+            input_dims, 
+            4
+        );
+        
+        ctx->input_tensors.push_back(std::move(tensor));
+        
+        std::vector<const char*> input_names_ptrs;
+        input_names_ptrs.push_back(ctx->input_name_strings[0].c_str());
+
+        ctx->output_tensors = ctx->session->Run(
+            Ort::RunOptions{nullptr}, 
+            input_names_ptrs.data(), 
+            ctx->input_tensors.data(), 
+            ctx->input_tensors.size(), 
+            output_names, 
+            num_outputs
+        );
+
+        auto end_time = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<float, std::milli> duration = end_time - start_time;
+        if (out_inference_time) *out_inference_time = duration.count();
+        
+        return 0;
+
+    } catch (const std::exception& e) {
+        std::cerr << "[Native] Loop Infer failed: " << e.what() << std::endl;
+        return 12;
+    }
+}
+

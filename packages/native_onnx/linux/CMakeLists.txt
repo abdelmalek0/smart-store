@@ -17,6 +17,7 @@ set(PLUGIN_NAME "native_onnx_plugin")
 list(APPEND PLUGIN_SOURCES
   "native_onnx_plugin.cc"
   "inference_bridge.cpp"
+  "texture_manager.cpp"
 )
 
 add_library(${PLUGIN_NAME} SHARED
@@ -38,6 +39,12 @@ target_include_directories(${PLUGIN_NAME} PRIVATE
 
 target_link_libraries(${PLUGIN_NAME} PRIVATE flutter)
 target_link_libraries(${PLUGIN_NAME} PRIVATE PkgConfig::GTK)
+
+# Add OpenGL for texture rendering
+set(OpenGL_GL_PREFERENCE GLVND)  # Use modern GLVND instead of legacy
+find_package(OpenGL REQUIRED)
+target_link_libraries(${PLUGIN_NAME} PRIVATE OpenGL::GL)
+target_link_libraries(${PLUGIN_NAME} PRIVATE OpenGL::GLX)
 
 # Use custom OpenCV with CUDA support
 set(OpenCV_DIR /opt/opencv-cuda/lib/cmake/opencv4)

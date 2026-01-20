@@ -45,6 +45,19 @@ typedef VideoGetFrameFunc =
       Pointer<Int32> height,
     );
 
+typedef VideoGetFrameAndInferFunc =
+    Int32 Function(
+      Int64 videoId,
+      Int64 sessionId,
+      Pointer<Utf8> inputName,
+      Pointer<Pointer<Utf8>> outputNames,
+      Int32 numOutputs,
+      Pointer<Pointer<Uint8>> outFrameBuffer,
+      Pointer<Int32> outWidth,
+      Pointer<Int32> outHeight,
+      Pointer<Float> outInferenceTime,
+    );
+
 // --- Image Preprocessing C Function Typedefs ---
 typedef PreprocessImageFunc =
     Int32 Function(
@@ -92,6 +105,19 @@ typedef VideoGetFrame =
       Pointer<Pointer<Uint8>> outBuffer,
       Pointer<Int32> width,
       Pointer<Int32> height,
+    );
+
+typedef VideoGetFrameAndInfer =
+    int Function(
+      int videoId,
+      int sessionId,
+      Pointer<Utf8> inputName,
+      Pointer<Pointer<Utf8>> outputNames,
+      int numOutputs,
+      Pointer<Pointer<Uint8>> outFrameBuffer,
+      Pointer<Int32> outWidth,
+      Pointer<Int32> outHeight,
+      Pointer<Float> outInferenceTime,
     );
 
 // Image Preprocessing Dart Typedef

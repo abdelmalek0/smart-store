@@ -32,6 +32,7 @@ class NativeInferenceService {
   late VideoOpen _videoOpen;
   late VideoRelease _videoRelease;
   late VideoGetFrame _videoGetFrame;
+  late VideoGetFrameAndInfer _videoGetFrameAndInfer;
   late PreprocessImage _preprocessImage;
 
   bool _isInitialized = false;
@@ -99,6 +100,10 @@ class NativeInferenceService {
         _preprocessImage = _lib!
             .lookupFunction<PreprocessImageFunc, PreprocessImage>(
               'PreprocessImage',
+            );
+        _videoGetFrameAndInfer = _lib!
+            .lookupFunction<VideoGetFrameAndInferFunc, VideoGetFrameAndInfer>(
+              'Video_GetFrameAndInfer',
             );
 
         _initONNX();
@@ -227,5 +232,81 @@ class NativeInferenceService {
     Pointer<Float> outData,
   ) {
     return _preprocessImage(inData, width, height, outData);
+  }
+
+  /// Get frame AND infer
+  /// Returns 0 on success
+  int videoGetFrameAndInfer(
+    int id,
+    int sessionId,
+    String inputName,
+    List<String> outputNames,
+    Pointer<Pointer<Uint8>> outBuffer,
+    Pointer<Int32> width,
+    Pointer<Int32> height,
+    Pointer<Float> outInferenceTime,
+  ) {
+    if (!_isInitialized) return -1;
+
+    final inputNamePtr = inputName.toNativeUtf8();
+    final outNamesPtr = calloc<Pointer<Utf8>>(outputNames.length);
+    for (int i = 0; i < outputNames.length; i++) {
+      outNamesPtr[i] = outputNames[i].toNativeUtf8();
+    }
+
+    try {
+      return _videoGetFrameAndInfer(
+        id,
+        sessionId,
+        inputNamePtr,
+        outNamesPtr,
+        outputNames.length,
+        outBuffer,
+        width,
+        height,
+        outInferenceTime,
+      );
+    } finally {
+      calloc.free(inputNamePtr);
+      for (int i = 0; i < outputNames.length; i++) calloc.free(outNamesPtr[i]);
+      calloc.free(outNamesPtr);
+    }
+  }
+
+  /// Retrieve outputs from a session (after a run)
+  void getSessionOutputs(
+    int id,
+    List<String> outputNames,
+    Map<String, List<dynamic>> outputs,
+  ) {
+    if (!_isInitialized) throw Exception("NativeService not initialized");
+
+    for (int i = 0; i < outputNames.length; i++) {
+      final dataPtrRef = calloc<Pointer<Float>>();
+      final dimsPtrRef = calloc<Pointer<Int64>>();
+      final rankRef = calloc<Int32>();
+      final countRef = calloc<Int64>();
+
+      try {
+        if (_getOutput(id, i, dataPtrRef, dimsPtrRef, rankRef, countRef) == 0) {
+          final count = countRef.value;
+          final rank = rankRef.value;
+          final dataPtr = dataPtrRef.value;
+          final dimsPtr = dimsPtrRef.value;
+
+          final dataList = Float32List.fromList(dataPtr.asTypedList(count));
+
+          List<int> shape = [];
+          for (int d = 0; d < rank; d++) shape.add(dimsPtr[d]);
+
+          outputs[outputNames[i]] = [dataList, shape];
+        }
+      } finally {
+        calloc.free(dataPtrRef);
+        calloc.free(dimsPtrRef);
+        calloc.free(rankRef);
+        calloc.free(countRef);
+      }
+    }
   }
 }

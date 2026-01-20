@@ -24,3 +24,14 @@ target_link_libraries(${BINARY_NAME} PRIVATE flutter)
 target_link_libraries(${BINARY_NAME} PRIVATE PkgConfig::GTK)
 
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
+
+# Add OpenCV for texture manager (matching native_onnx plugin config)
+set(OpenCV_DIR /opt/opencv-cuda/lib/cmake/opencv4)
+find_package(OpenCV REQUIRED COMPONENTS core)
+target_include_directories(${BINARY_NAME} PRIVATE ${OpenCV_INCLUDE_DIRS})
+target_link_libraries(${BINARY_NAME} PRIVATE ${OpenCV_LIBS})
+
+# Add OpenGL for texture manager
+set(OpenGL_GL_PREFERENCE GLVND)
+find_package(OpenGL REQUIRED)
+target_link_libraries(${BINARY_NAME} PRIVATE OpenGL::GL OpenGL::GLX)

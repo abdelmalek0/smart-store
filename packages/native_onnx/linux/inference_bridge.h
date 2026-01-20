@@ -61,6 +61,21 @@ ONNX_BRIDGE_EXPORT void Video_Release(int64_t video_id);
 // Returns 0 on success
 ONNX_BRIDGE_EXPORT int Video_GetFrame(int64_t video_id, uint8_t** out_buffer, int* width, int* height);
 
+// Get the next frame AND run inference on it (Zero-Copy optimization)
+// input_name: name of input node (e.g. "images")
+// Returns 0 on success
+ONNX_BRIDGE_EXPORT int Video_GetFrameAndInfer(
+    int64_t video_id,
+    int64_t session_id,
+    const char* input_name,
+    const char** output_names,
+    int num_outputs,
+    uint8_t** out_frame_buffer,
+    int* out_width,
+    int* out_height,
+    float* out_inference_time
+);
+
 #ifdef __cplusplus
 }
 #endif
