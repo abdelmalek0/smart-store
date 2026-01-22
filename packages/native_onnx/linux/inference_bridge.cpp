@@ -32,6 +32,12 @@ extern "C" {
 }
 #endif
 
+// NPP headers for GPU-native NV12 to RGBA conversion
+#ifdef USE_NPP
+#include <nppi_color_conversion.h>
+#include <npp.h>
+#endif
+
 // Global Environment
 static std::unique_ptr<Ort::Env> g_env;
 static std::unique_ptr<Ort::AllocatorWithDefaultOptions> g_allocator;
@@ -429,6 +435,99 @@ void ReleaseSession(int64_t session_id) {
     std::lock_guard<std::mutex> lock(g_contexts_mutex);
     g_contexts.erase(session_id);
     std::cout << "[Native] Session " << session_id << " released." << std::endl;
+}
+
+// ==========================================
+// SHUTDOWN - Must be called before app exit!
+// ==========================================
+// This releases all GPU resources in the correct order:
+// 1. Release all video contexts (CUDA HW decoder contexts)
+// 2. Release all ONNX sessions (CUDA tensors/memory)
+// 3. Destroy global ONNX environment
+// This prevents "CUDA driver shutting down" crashes on exit.
+extern "C" __attribute__((visibility("default"))) __attribute__((used))
+void Inference_Shutdown() {
+    std::cout << "[Native] ========================================" << std::endl;
+    std::cout << "[Native] Shutdown: Releasing all GPU resources..." << std::endl;
+    
+    // 1. Release all video contexts first (they hold CUDA HW decoder buffers)
+    {
+        std::lock_guard<std::mutex> lock(g_video_mutex);
+        int video_count = g_video_contexts.size();
+        for (auto& pair : g_video_contexts) {
+            auto& ctx = pair.second;
+#ifdef USE_FFMPEG_NVDEC
+            if (ctx->sws_ctx) {
+                sws_freeContext(ctx->sws_ctx);
+                ctx->sws_ctx = nullptr;
+            }
+            if (ctx->packet) {
+                av_packet_free(&ctx->packet);
+            }
+            if (ctx->frame) {
+                av_frame_free(&ctx->frame);
+            }
+            if (ctx->sw_frame) {
+                av_frame_free(&ctx->sw_frame);
+            }
+            if (ctx->codec_ctx) {
+                avcodec_free_context(&ctx->codec_ctx);
+            }
+            if (ctx->hw_device_ctx) {
+                av_buffer_unref(&ctx->hw_device_ctx);
+            }
+            if (ctx->format_ctx) {
+                avformat_close_input(&ctx->format_ctx);
+            }
+            // Clear GPU mats
+            ctx->last_rgba_gpu.release();
+#endif
+        }
+        g_video_contexts.clear();
+        std::cout << "[Native] ✓ Released " << video_count << " video contexts" << std::endl;
+    }
+    
+    // 2. Release all ONNX sessions (they hold CUDA memory for tensors)
+    {
+        std::lock_guard<std::mutex> lock(g_contexts_mutex);
+        int session_count = g_contexts.size();
+        for (auto& pair : g_contexts) {
+            auto& ctx = pair.second;
+            // Clear tensors first
+            ctx->input_tensors.clear();
+            ctx->output_tensors.clear();
+            // Release CUDA tensor if allocated
+            if (ctx->cuda_tensor_ptr) {
+#ifdef USE_CUDA
+                cudaFree(ctx->cuda_tensor_ptr);
+#endif
+                ctx->cuda_tensor_ptr = nullptr;
+            }
+            // Release GPU preprocess buffer
+            ctx->gpu_preprocess_buffer.release();
+            // Session destructor will handle ONNX cleanup
+            ctx->session.reset();
+        }
+        g_contexts.clear();
+        std::cout << "[Native] ✓ Released " << session_count << " ONNX sessions" << std::endl;
+    }
+    
+    // 3. Destroy global environment (must be last)
+    {
+        std::lock_guard<std::mutex> lock(g_env_mutex);
+        g_allocator.reset();
+        g_env.reset();
+        std::cout << "[Native] ✓ Destroyed global ONNX environment" << std::endl;
+    }
+    
+    // 4. Synchronize CUDA to ensure all operations complete
+#ifdef USE_CUDA
+    cudaDeviceSynchronize();
+    std::cout << "[Native] ✓ CUDA synchronized" << std::endl;
+#endif
+    
+    std::cout << "[Native] Shutdown complete - safe to exit" << std::endl;
+    std::cout << "[Native] ========================================" << std::endl;
 }
 
 void Session_ClearInputs(int64_t session_id) {
@@ -926,10 +1025,75 @@ int Video_GetFrame(int64_t video_id, uint8_t** out_buffer, int* width, int* heig
         try {
             cv::cuda::GpuMat rgba_gpu;
             
+#ifdef USE_NPP
+            // ========================================
+            // GPU-NATIVE NV12 -> RGBA CONVERSION (NPP)
+            // ========================================
+            // Keep frames in CUDA memory - no CPU roundtrip!
+            
+            static bool npp_logged = false;
+            if (!npp_logged) {
+                std::cout << "[NPP] ✓ Using GPU-native NV12 to RGBA conversion" << std::endl;
+                npp_logged = true;
+            }
+            
+            // NVDEC frame is AV_PIX_FMT_CUDA with NV12 data in GPU memory
+            // We can access the CUDA pointers directly from AVFrame->data[]
+            
+            if (ctx->frame->format == AV_PIX_FMT_CUDA) {
+                // Frame is in GPU memory - true zero-copy path!
+                int frame_w = ctx->frame->width;
+                int frame_h = ctx->frame->height;
+                
+                // Allocate GPU buffers for RGB and RGBA output
+                cv::cuda::GpuMat rgb_gpu(frame_h, frame_w, CV_8UC3);
+                rgba_gpu.create(frame_h, frame_w, CV_8UC4);
+                
+                // NPP NV12 to RGB conversion
+                // NVDEC NV12: Y plane = data[0], UV plane = data[1]
+                const Npp8u* pSrc[2] = {
+                    (const Npp8u*)ctx->frame->data[0],
+                    (const Npp8u*)ctx->frame->data[1]
+                };
+                int nSrcStep = ctx->frame->linesize[0];
+                NppiSize oSizeROI = {frame_w, frame_h};
+                
+                NppStatus npp_status = nppiNV12ToRGB_8u_P2C3R(
+                    pSrc, nSrcStep,
+                    rgb_gpu.ptr<Npp8u>(), (int)rgb_gpu.step,
+                    oSizeROI
+                );
+                
+                if (npp_status != NPP_SUCCESS) {
+                    std::cerr << "[NPP] NV12 to RGB failed: " << npp_status << std::endl;
+                    // Fall through to CPU fallback
+                    goto cpu_fallback;
+                }
+                
+                // Add alpha channel: RGB -> RGBA on GPU
+                cv::cuda::cvtColor(rgb_gpu, rgba_gpu, cv::COLOR_RGB2RGBA);
+                
+            } else {
+                // Frame already on CPU (unusual for NVDEC), use CPU path
+                goto cpu_fallback;
+            }
+            
+            // Skip CPU fallback if NPP succeeded
+            goto npp_done;
+            
+cpu_fallback:
+#endif
+            {
                 // ========================================
                 // NV12 -> RGBA CONVERSION (CPU Fallback)
                 // ========================================
                 // OpenCV CUDA doesn't support COLOR_YUV2RGBA_NV12, so we use CPU.
+                
+                static bool cpu_fallback_logged = false;
+                if (!cpu_fallback_logged) {
+                    std::cout << "[NV12] Using CPU fallback for color conversion" << std::endl;
+                    cpu_fallback_logged = true;
+                }
                 
                 // 1. Get NV12 data (Transfer from GPU if needed)
                 AVFrame* frame_to_convert = nullptr;
@@ -975,7 +1139,11 @@ int Video_GetFrame(int64_t video_id, uint8_t** out_buffer, int* width, int* heig
                 
                 // 4. Upload to GPU
                 rgba_gpu.upload(rgba_cpu);
-
+            }
+            
+#ifdef USE_NPP
+npp_done:
+#endif
             
             // Update OpenGL texture via CUDA-GL interop (zero-copy!)
             int tex_id = ctx->texture_manager_id > 0 ? ctx->texture_manager_id : ctx->texture_id;
@@ -1199,6 +1367,18 @@ int Texture_UploadPending(int texture_id) {
         return 0;  // Success - frame uploaded
     }
     return -1;  // No pending frame or error
+}
+
+// Check if texture has valid frame content (safe to sample)
+extern "C" __attribute__((visibility("default"))) __attribute__((used))
+int Texture_HasValidFrame(int texture_id) {
+    return texture_manager::TextureManager::getInstance().hasValidFrame(texture_id) ? 1 : 0;
+}
+
+// Ensure GL texture is created (MUST call from UI thread with GL context)
+extern "C" __attribute__((visibility("default"))) __attribute__((used))
+int Texture_EnsureGLTexture(int texture_id) {
+    return texture_manager::TextureManager::getInstance().ensureGLTexture(texture_id) ? 0 : -1;
 }
 
 

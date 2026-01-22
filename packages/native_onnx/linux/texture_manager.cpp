@@ -4,6 +4,49 @@
 #include <opencv2/imgproc.hpp>
 #include <opencv2/imgcodecs.hpp>
 
+// OpenGL extension functions for PBO (Pixel Buffer Objects)
+// These may not be in the standard GL/gl.h
+#define GL_PIXEL_UNPACK_BUFFER 0x88EC
+#define GL_STREAM_DRAW 0x88E0
+
+// Function pointers for OpenGL buffer operations
+typedef void (*PFNGLGENBUFFERSPROC)(GLsizei n, GLuint* buffers);
+typedef void (*PFNGLBINDBUFFERPROC)(GLenum target, GLuint buffer);
+typedef void (*PFNGLBUFFERDATAPROC)(GLenum target, GLsizeiptr size, const void* data, GLenum usage);
+typedef void (*PFNGLDELETEBUFFERSPROC)(GLsizei n, const GLuint* buffers);
+
+// These will be loaded dynamically
+static PFNGLGENBUFFERSPROC glGenBuffers_ptr = nullptr;
+static PFNGLBINDBUFFERPROC glBindBuffer_ptr = nullptr;
+static PFNGLBUFFERDATAPROC glBufferData_ptr = nullptr;
+static PFNGLDELETEBUFFERSPROC glDeleteBuffers_ptr = nullptr;
+static bool gl_funcs_loaded = false;
+
+// Wrapper macros
+#define glGenBuffers glGenBuffers_ptr
+#define glBindBuffer glBindBuffer_ptr
+#define glBufferData glBufferData_ptr
+#define glDeleteBuffers glDeleteBuffers_ptr
+
+// Load GL extension functions dynamically
+#include <GL/glx.h>
+static void loadGLFunctions() {
+    if (gl_funcs_loaded) return;
+    
+    glGenBuffers_ptr = (PFNGLGENBUFFERSPROC)glXGetProcAddressARB((const GLubyte*)"glGenBuffers");
+    glBindBuffer_ptr = (PFNGLBINDBUFFERPROC)glXGetProcAddressARB((const GLubyte*)"glBindBuffer");
+    glBufferData_ptr = (PFNGLBUFFERDATAPROC)glXGetProcAddressARB((const GLubyte*)"glBufferData");
+    glDeleteBuffers_ptr = (PFNGLDELETEBUFFERSPROC)glXGetProcAddressARB((const GLubyte*)"glDeleteBuffers");
+    
+    gl_funcs_loaded = true;
+    
+    if (glGenBuffers_ptr && glBindBuffer_ptr && glBufferData_ptr) {
+        std::cout << "[TextureManager] ✓ OpenGL PBO functions loaded" << std::endl;
+    } else {
+        std::cerr << "[TextureManager] ⚠ Some PBO functions not available" << std::endl;
+    }
+}
+
 namespace texture_manager {
 
 TextureManager& TextureManager::getInstance() {
@@ -44,6 +87,34 @@ bool TextureManager::initializeGL() {
     
     std::cout << "[TextureManager] OpenGL Version: " << version << std::endl;
     
+    // Load OpenGL extension functions (PBO support)
+    loadGLFunctions();
+    
+    // Initialize CUDA for GL interop
+    // This must be done AFTER OpenGL context is current
+    int cuda_device_count = 0;
+    cudaError_t err = cudaGetDeviceCount(&cuda_device_count);
+    if (err == cudaSuccess && cuda_device_count > 0) {
+        // Get the CUDA device that corresponds to the current OpenGL context
+        unsigned int gl_device_count = 0;
+        int cuda_devices[8];
+        err = cudaGLGetDevices(&gl_device_count, cuda_devices, 8, cudaGLDeviceListAll);
+        
+        if (err == cudaSuccess && gl_device_count > 0) {
+            // Use the first CUDA device that matches OpenGL
+            cudaSetDevice(cuda_devices[0]);
+            std::cout << "[TextureManager] ✓ CUDA device " << cuda_devices[0] 
+                      << " selected for GL interop" << std::endl;
+        } else {
+            // Fallback: just use device 0
+            cudaSetDevice(0);
+            std::cout << "[TextureManager] Using CUDA device 0 (GL device query failed: " 
+                      << cudaGetErrorString(err) << ")" << std::endl;
+        }
+    } else {
+        std::cerr << "[TextureManager] WARNING: No CUDA devices available for interop" << std::endl;
+    }
+    
     gl_initialized_ = true;
     return true;
 }
@@ -52,30 +123,94 @@ bool TextureManager::registerCudaInterop(TextureInfo* info) {
     if (info->interop_registered) return true;
     if (info->gl_texture_id == 0) return false;
     
-    cudaError_t err = cudaGraphicsGLRegisterImage(
-        &info->cuda_resource,
-        info->gl_texture_id,
-        GL_TEXTURE_2D,
-        cudaGraphicsRegisterFlagsWriteDiscard
-    );
-    
-    if (err != cudaSuccess) {
-        std::cerr << "[TextureManager] CUDA-GL interop registration failed: " 
-                  << cudaGetErrorString(err) << std::endl;
+    // Make sure CUDA is initialized
+    int device_count = 0;
+    cudaError_t err = cudaGetDeviceCount(&device_count);
+    if (err != cudaSuccess || device_count == 0) {
+        std::cerr << "[TextureManager] CUDA not available: " << cudaGetErrorString(err) << std::endl;
         return false;
     }
     
-    info->interop_registered = true;
-    std::cout << "[TextureManager] ✓ CUDA-GL interop registered for GL texture " 
-              << info->gl_texture_id << std::endl;
-    return true;
+    // Try multiple registration flag combinations for TEXTURE
+    unsigned int flags[] = {
+        cudaGraphicsRegisterFlagsWriteDiscard,
+        cudaGraphicsRegisterFlagsSurfaceLoadStore,
+        cudaGraphicsRegisterFlagsNone
+    };
+    const char* flag_names[] = {
+        "WriteDiscard",
+        "SurfaceLoadStore", 
+        "None"
+    };
+    
+    for (int i = 0; i < 3; i++) {
+        err = cudaGraphicsGLRegisterImage(
+            &info->cuda_resource,
+            info->gl_texture_id,
+            GL_TEXTURE_2D,
+            flags[i]
+        );
+        
+        if (err == cudaSuccess) {
+            info->interop_registered = true;
+            std::cout << "[TextureManager] ✓ CUDA-GL texture interop registered (flags=" 
+                      << flag_names[i] << ") for GL texture " 
+                      << info->gl_texture_id << std::endl;
+            return true;
+        }
+        
+        // Clear the error state
+        cudaGetLastError();
+    }
+    
+    std::cout << "[TextureManager] Texture interop failed, trying PBO path..." << std::endl;
+    
+    // ========================================
+    // PBO FALLBACK: Create a Pixel Buffer Object and register that
+    // PBO buffer interop often works when texture interop fails
+    // ========================================
+    
+    // Create PBO for this texture
+    int pbo_size = info->gl_width * info->gl_height * 4; // RGBA
+    glGenBuffers(1, &info->pbo_id);
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, info->pbo_id);
+    glBufferData(GL_PIXEL_UNPACK_BUFFER, pbo_size, nullptr, GL_STREAM_DRAW);
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+    
+    GLenum gl_error = glGetError();
+    if (gl_error != GL_NO_ERROR) {
+        std::cerr << "[TextureManager] Failed to create PBO: GL error " << gl_error << std::endl;
+        return false;
+    }
+    
+    // Try to register PBO with CUDA
+    err = cudaGraphicsGLRegisterBuffer(
+        &info->pbo_cuda_resource,
+        info->pbo_id,
+        cudaGraphicsRegisterFlagsWriteDiscard
+    );
+    
+    if (err == cudaSuccess) {
+        info->pbo_registered = true;
+        info->use_pbo_path = true;
+        std::cout << "[TextureManager] ✓ CUDA-GL PBO interop registered for texture " 
+                  << info->gl_texture_id << " (PBO=" << info->pbo_id << ")" << std::endl;
+        return true;
+    }
+    
+    std::cerr << "[TextureManager] PBO interop also failed: " << cudaGetErrorString(err) << std::endl;
+    
+    // Clean up PBO if registration failed
+    glDeleteBuffers(1, &info->pbo_id);
+    info->pbo_id = 0;
+    
+    std::cerr << "[TextureManager] All CUDA-GL interop registration attempts failed" << std::endl;
+    return false;
 }
 
 int TextureManager::createTexture(int width, int height) {
-    if (!initializeGL()) {
-        std::cerr << "[TextureManager] Failed to initialize GL" << std::endl;
-        return -1;
-    }
+    // NOTE: This may be called without a GL context!
+    // We defer actual GL texture creation to ensureGLTexture()
     
     std::lock_guard<std::mutex> lock(map_mutex_);
     
@@ -85,14 +220,48 @@ int TextureManager::createTexture(int width, int height) {
     info.height = height;
     info.gl_width = width;
     info.gl_height = height;
+    info.gl_texture_id = 0;  // Deferred - will be created in ensureGLTexture
     
-    // Create OpenGL texture
-    glGenTextures(1, &info.gl_texture_id);
-    glBindTexture(GL_TEXTURE_2D, info.gl_texture_id);
+    textures_[texture_id] = std::move(info);
     
-    // Allocate storage with black pixels (prevent garbage display)
-    std::vector<uint8_t> black_pixels(width * height * 4, 0); // Open to optimization if needed for large textures
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, black_pixels.data());
+    std::cout << "[TextureManager] Reserved texture slot " << texture_id 
+              << " (" << width << "x" << height << ") - GL creation deferred" << std::endl;
+    
+    return texture_id;
+}
+
+bool TextureManager::ensureGLTexture(int texture_id) {
+    // MUST be called from UI thread with GL context!
+    TextureInfo* info = getTexture(texture_id);
+    if (!info) return false;
+    
+    // Already created?
+    if (info->gl_texture_id != 0) return true;
+    
+    // Initialize GL if needed
+    if (!initializeGL()) {
+        std::cerr << "[TextureManager] Failed to initialize GL in ensureGLTexture" << std::endl;
+        return false;
+    }
+    
+    // Clear any previous GL errors
+    while (glGetError() != GL_NO_ERROR) {}
+    
+    // Create OpenGL texture NOW (on correct GL context)
+    glGenTextures(1, &info->gl_texture_id);
+    glBindTexture(GL_TEXTURE_2D, info->gl_texture_id);
+    
+    // Allocate storage with black pixels
+    std::vector<uint8_t> black_pixels(info->gl_width * info->gl_height * 4, 0);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, info->gl_width, info->gl_height, 0, 
+                 GL_RGBA, GL_UNSIGNED_BYTE, black_pixels.data());
+    
+    GLenum gl_error = glGetError();
+    if (gl_error != GL_NO_ERROR) {
+        std::cerr << "[TextureManager] glTexImage2D error: " << gl_error << std::endl;
+        info->gl_texture_id = 0;
+        return false;
+    }
     
     // Set texture parameters
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -101,14 +270,18 @@ int TextureManager::createTexture(int width, int height) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     
     glBindTexture(GL_TEXTURE_2D, 0);
+    glFlush();  // Ensure texture is fully created
     
-    textures_[texture_id] = std::move(info);
+    std::cout << "[TextureManager] Created GL texture " << info->gl_texture_id 
+              << " for slot " << texture_id << " (" << info->gl_width << "x" 
+              << info->gl_height << ")" << std::endl;
     
-    std::cout << "[TextureManager] Created texture " << texture_id 
-              << " (GL=" << textures_[texture_id].gl_texture_id 
-              << ", " << width << "x" << height << ")" << std::endl;
-    
-    return texture_id;
+    return true;
+}
+
+bool TextureManager::hasGLTexture(int texture_id) {
+    TextureInfo* info = getTexture(texture_id);
+    return info && info->gl_texture_id != 0;
 }
 
 TextureInfo* TextureManager::getTexture(int texture_id) {
@@ -160,12 +333,63 @@ bool TextureManager::uploadPendingGpuFrame(int texture_id) {
         }
     }
     
-    // 2. PATH A: DIRECT GL UPLOAD (Fallback)
-    if (!info->interop_registered) {
+    // 2. PATH A: PBO-based GPU transfer (when texture interop fails but PBO works)
+    if (info->use_pbo_path && info->pbo_registered) {
+        static bool pbo_logged = false;
+        if (!pbo_logged) {
+            std::cout << "[TextureManager] Using PBO path for GPU transfer" << std::endl;
+            pbo_logged = true;
+        }
+        
+        // Map PBO to CUDA
+        cudaError_t err = cudaGraphicsMapResources(1, &info->pbo_cuda_resource, 0);
+        if (err != cudaSuccess) {
+            std::cerr << "[TextureManager] PBO map failed: " << cudaGetErrorString(err) << std::endl;
+            goto cpu_fallback;
+        }
+        
+        // Get device pointer to PBO
+        void* pbo_ptr = nullptr;
+        size_t pbo_size = 0;
+        err = cudaGraphicsResourceGetMappedPointer(&pbo_ptr, &pbo_size, info->pbo_cuda_resource);
+        if (err != cudaSuccess) {
+            cudaGraphicsUnmapResources(1, &info->pbo_cuda_resource, 0);
+            std::cerr << "[TextureManager] PBO get pointer failed: " << cudaGetErrorString(err) << std::endl;
+            goto cpu_fallback;
+        }
+        
+        // Copy from GPU frame to PBO (GPU-to-GPU transfer!)
+        cudaMemcpy2D(pbo_ptr, frame_to_upload.cols * 4,
+                     frame_to_upload.data, frame_to_upload.step,
+                     frame_to_upload.cols * 4, frame_to_upload.rows,
+                     cudaMemcpyDeviceToDevice);
+        
+        // Unmap PBO from CUDA
+        cudaGraphicsUnmapResources(1, &info->pbo_cuda_resource, 0);
+        
+        // Now use OpenGL to copy from PBO to texture (GL-side operation, very fast)
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, info->pbo_id);
+        glBindTexture(GL_TEXTURE_2D, info->gl_texture_id);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 
+                        frame_to_upload.cols, frame_to_upload.rows,
+                        GL_RGBA, GL_UNSIGNED_BYTE, 0);  // 0 = read from bound PBO
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+        
+        info->width = frame_to_upload.cols;
+        info->height = frame_to_upload.rows;
+        info->has_valid_frame = true;
+        
+        return true;
+    }
+    
+    // 3. PATH B: Direct CPU fallback (slowest - but always works)
+cpu_fallback:
+    {
         cv::Mat cpu_frame;
         frame_to_upload.download(cpu_frame);
         
-        // Scale to texture size (avoid GL resize)
+        // Scale to texture size if needed
         cv::Mat frame_to_use;
         if (cpu_frame.cols != info->gl_width || cpu_frame.rows != info->gl_height) {
             cv::resize(cpu_frame, frame_to_use, cv::Size(info->gl_width, info->gl_height));
@@ -177,20 +401,35 @@ bool TextureManager::uploadPendingGpuFrame(int texture_id) {
             frame_to_use = frame_to_use.clone();
         }
         
-        // Upload to GL
+        // Upload to GL texture
         glBindTexture(GL_TEXTURE_2D, info->gl_texture_id);
         glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 
-                     frame_to_use.cols, frame_to_use.rows, 0,
-                     GL_RGBA, GL_UNSIGNED_BYTE, frame_to_use.data);
+        
+        // Use glTexSubImage2D if texture already has correct size (faster)
+        if (frame_to_use.cols == info->gl_width && frame_to_use.rows == info->gl_height) {
+            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0,
+                            frame_to_use.cols, frame_to_use.rows,
+                            GL_RGBA, GL_UNSIGNED_BYTE, frame_to_use.data);
+        } else {
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 
+                         frame_to_use.cols, frame_to_use.rows, 0,
+                         GL_RGBA, GL_UNSIGNED_BYTE, frame_to_use.data);
+            info->gl_width = frame_to_use.cols;
+            info->gl_height = frame_to_use.rows;
+        }
                      
-        // Update dimensions logic
+        // Update dimensions
         info->width = frame_to_use.cols;
         info->height = frame_to_use.rows;
         
         glBindTexture(GL_TEXTURE_2D, 0);
         glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
         
+        // CRITICAL: Ensure GL commands are flushed before Flutter samples the texture
+        // This prevents rendering artifacts (black/garbage frames)
+        glFlush();
+        
+        info->has_valid_frame = true;
         return true;
     }
     
@@ -233,6 +472,7 @@ bool TextureManager::uploadPendingGpuFrame(int texture_id) {
     
     info->width = frame_to_upload.cols;
     info->height = frame_to_upload.rows;
+    info->has_valid_frame = true;
     
     return true;
 }
@@ -284,6 +524,11 @@ void TextureManager::releaseTexture(int texture_id) {
 GLuint TextureManager::getGLTextureId(int texture_id) {
     TextureInfo* info = getTexture(texture_id);
     return info ? info->gl_texture_id : 0;
+}
+
+bool TextureManager::hasValidFrame(int texture_id) {
+    TextureInfo* info = getTexture(texture_id);
+    return info ? info->has_valid_frame : false;
 }
 
 bool TextureManager::getTextureDimensions(int texture_id, int* width, int* height) {

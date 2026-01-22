@@ -23,6 +23,7 @@ class NativeInferenceService {
   late InitONNX _initONNX;
   late CreateSession _createSession;
   late ReleaseSession _releaseSession;
+  late InferenceShutdown _inferenceShutdown;
   late SessionClearInputs _clearInputs;
   late SessionAddInput _addInput;
   late SessionRun _run;
@@ -74,6 +75,10 @@ class NativeInferenceService {
         _releaseSession = _lib!
             .lookupFunction<ReleaseSessionFunc, ReleaseSession>(
               'ReleaseSession',
+            );
+        _inferenceShutdown = _lib!
+            .lookupFunction<InferenceShutdownFunc, InferenceShutdown>(
+              'Inference_Shutdown',
             );
         _clearInputs = _lib!
             .lookupFunction<SessionClearInputsFunc, SessionClearInputs>(
@@ -129,6 +134,16 @@ class NativeInferenceService {
 
   /// Release an ONNX session
   void releaseSession(int id) => _releaseSession(id);
+
+  /// Shutdown all GPU resources - MUST be called before app exit!
+  /// This releases all ONNX sessions, video contexts, and CUDA resources
+  /// in the correct order to prevent CUDA driver shutdown crashes.
+  void shutdown() {
+    if (!_isInitialized) return;
+    _inferenceShutdown();
+    _isInitialized = false;
+    _initFuture = null;
+  }
 
   /// Run inference on a session
   void runSession(

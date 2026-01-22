@@ -73,6 +73,19 @@ if(CUDA_FOUND)
     target_link_libraries(${PLUGIN_NAME} PRIVATE ${CUDA_LIBRARIES})
     message(STATUS "Using system CUDA runtime library: ${CUDA_LIBRARIES}")
   endif()
+  
+  # Link NPP libraries for GPU-native NV12 to RGBA conversion
+  find_library(NPP_CORE_LIB nppc HINTS ${CUDA_TOOLKIT_ROOT_DIR}/lib64)
+  find_library(NPP_IMGPROC_LIB nppig HINTS ${CUDA_TOOLKIT_ROOT_DIR}/lib64)
+  find_library(NPP_COLOR_LIB nppicc HINTS ${CUDA_TOOLKIT_ROOT_DIR}/lib64)
+  
+  if(NPP_CORE_LIB AND NPP_IMGPROC_LIB AND NPP_COLOR_LIB)
+    target_link_libraries(${PLUGIN_NAME} PRIVATE ${NPP_CORE_LIB} ${NPP_IMGPROC_LIB} ${NPP_COLOR_LIB})
+    target_compile_definitions(${PLUGIN_NAME} PRIVATE USE_NPP)
+    message(STATUS "NPP libraries found - enabling GPU-native NV12 conversion")
+  else()
+    message(WARNING "NPP libraries not found - falling back to CPU NV12 conversion")
+  endif()
 endif()
 
 # Add FFmpeg libraries for hardware video decoding (NVDEC)

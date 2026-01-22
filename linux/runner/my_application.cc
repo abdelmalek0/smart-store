@@ -49,6 +49,8 @@ G_DEFINE_TYPE(VideoTextureGL, video_texture_gl, fl_texture_gl_get_type())
 extern "C" uint32_t Texture_GetGLHandle(int texture_id);
 extern "C" int Texture_GetDimensions(int texture_id, int* width, int* height);
 extern "C" int Texture_UploadPending(int texture_id);
+extern "C" int Texture_HasValidFrame(int texture_id);
+extern "C" int Texture_EnsureGLTexture(int texture_id);
 
 static gboolean video_texture_gl_populate(FlTextureGL* texture,
                                           uint32_t* target,
@@ -58,14 +60,25 @@ static gboolean video_texture_gl_populate(FlTextureGL* texture,
                                           GError** error) {
   VideoTextureGL* self = VIDEO_TEXTURE_GL(texture);
   
-  // Upload any pending frame data to GL texture (this is the UI thread with GL context!)
+  // STEP 1: Ensure GL texture is created (this is deferred from createTexture)
+  // This MUST happen on the UI thread with GL context current - which is here!
+  if (Texture_EnsureGLTexture(self->texture_manager_id) != 0) {
+       // GL texture creation failed
+       *target = GL_TEXTURE_2D;
+       *name = 0; 
+       *width = 0;
+       *height = 0;
+       return TRUE;
+  }
+  
+  // STEP 2: Upload any pending frame data to GL texture
   Texture_UploadPending(self->texture_manager_id);
   
-  // Use shared wrapper to get GL handle
+  // STEP 3: Get GL handle
   uint32_t gl_id = Texture_GetGLHandle(self->texture_manager_id);
   
   if (gl_id == 0) {
-       // If texture not ready, return 0/empty to avoid rendering artifacts (like the UI itself)
+       // Texture not ready
        *target = GL_TEXTURE_2D;
        *name = 0; 
        *width = 0;
@@ -73,6 +86,7 @@ static gboolean video_texture_gl_populate(FlTextureGL* texture,
        return TRUE;
   }
 
+  // Return texture to Flutter
   *target = GL_TEXTURE_2D;
   *name = gl_id;
   
@@ -80,7 +94,6 @@ static gboolean video_texture_gl_populate(FlTextureGL* texture,
   int actual_width = 1920;
   int actual_height = 1080;
   if (Texture_GetDimensions(self->texture_manager_id, &actual_width, &actual_height) != 0) {
-      // Fallback if dimensions not available
       actual_width = 1920;
       actual_height = 1080;
   }

@@ -22,6 +22,10 @@ ONNX_BRIDGE_EXPORT int64_t CreateSession(const char* model_path);
 // Release a specific session
 ONNX_BRIDGE_EXPORT void ReleaseSession(int64_t session_id);
 
+// Shutdown all GPU resources - MUST be called before app exit!
+// This prevents CUDA driver shutdown crashes.
+ONNX_BRIDGE_EXPORT void Inference_Shutdown();
+
 // Clear previously set inputs for the session (preparation for new run)
 ONNX_BRIDGE_EXPORT void Session_ClearInputs(int64_t session_id);
 

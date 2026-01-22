@@ -25,6 +25,16 @@ struct TextureInfo {
     bool interop_registered = false;
     bool interop_attempted = false;  // Track if interop was already tried (to avoid repeated failures)
     
+    // PBO (Pixel Buffer Object) for CUDA-GL buffer interop
+    // This works when direct texture interop fails (e.g., on EGL contexts)
+    GLuint pbo_id = 0;
+    cudaGraphicsResource_t pbo_cuda_resource = nullptr;
+    bool pbo_registered = false;
+    bool use_pbo_path = false;  // Set to true if texture interop fails but PBO works
+    
+    // Frame readiness - prevents Flutter from sampling uninitialized texture
+    bool has_valid_frame = false;  // Set to true after first successful frame upload
+    
     // Pending GPU frame for deferred upload (thread-safe)
     cv::cuda::GpuMat pending_gpu_frame;
     bool has_pending_gpu_frame = false;
@@ -60,6 +70,15 @@ public:
     
     // Get OpenGL texture ID for Flutter
     GLuint getGLTextureId(int texture_id);
+    
+    // Check if texture has valid frame content (safe to sample)
+    bool hasValidFrame(int texture_id);
+    
+    // Check if GL texture has been created (may be deferred)
+    bool hasGLTexture(int texture_id);
+    
+    // Ensure GL texture is created (call from UI thread with GL context)
+    bool ensureGLTexture(int texture_id);
     
     // Get texture dimensions (returns false if not found)
     bool getTextureDimensions(int texture_id, int* width, int* height);

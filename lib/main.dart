@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:fvp/fvp.dart' as fvp;
 import 'package:permission_handler/permission_handler.dart';
+import 'package:native_onnx/src/native_inference_service.dart';
 
 import 'package:window_manager/window_manager.dart';
 import 'package:smart_store_linux/ui/theme/app_theme.dart';
@@ -61,8 +62,35 @@ class VisionLabApp extends StatefulWidget {
   State<VisionLabApp> createState() => _VisionLabAppState();
 }
 
-class _VisionLabAppState extends State<VisionLabApp> {
+class _VisionLabAppState extends State<VisionLabApp>
+    with WidgetsBindingObserver {
   late LinuxResourceMonitor _monitor;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.detached) {
+      // App is being closed - shutdown native resources properly
+      _shutdownNativeResources();
+    }
+  }
+
+  void _shutdownNativeResources() {
+    debugPrint("[App] Shutting down native resources...");
+    try {
+      // Shutdown native ONNX/CUDA resources before app exit
+      NativeInferenceService().shutdown();
+      debugPrint("[App] Native resources released successfully");
+    } catch (e) {
+      debugPrint("[App] Error during native shutdown: $e");
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -109,7 +137,10 @@ class _VisionLabAppState extends State<VisionLabApp> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _monitor.stop();
+    // Also shutdown native resources on dispose
+    _shutdownNativeResources();
     super.dispose();
   }
 }
