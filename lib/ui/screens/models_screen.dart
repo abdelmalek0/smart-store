@@ -30,56 +30,99 @@ class ModelsScreen extends StatelessWidget {
         const SizedBox(height: 20),
         Expanded(
           child: modelProvider.models.isEmpty
-              ? Center(
-                  child: ModernLabel(
-                    "No models added yet.",
-                    color: AppTheme.text.withValues(alpha: 0.5),
-                  ),
-                )
+              ? _buildEmptyState(context)
               : ListView.builder(
                   itemCount: modelProvider.models.length,
                   itemBuilder: (context, index) {
                     final model = modelProvider.models[index];
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: ModernCard(
-                        child: Row(
-                          children: [
-                            Icon(Icons.extension, color: AppTheme.accent),
-                            const SizedBox(width: 16),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  ModernLabel(
-                                    model.name,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                  const SizedBox(height: 4),
-                                  ModernLabel(
-                                    model.path,
-                                    fontSize: 12,
-                                    color: AppTheme.text.withValues(alpha: 0.6),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            IconButton(
-                              icon: const Icon(
-                                Icons.delete,
-                                color: AppTheme.destructive,
-                              ),
-                              onPressed: () =>
-                                  modelProvider.removeModel(model.id),
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
+                    return _buildModelCard(context, model, modelProvider);
                   },
                 ),
         ),
       ],
+    );
+  }
+
+  Widget _buildModelCard(BuildContext context, model, ModelProvider provider) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF111827), // Dark slate/black card bg
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFF1F2937)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1F2937),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Icon(Icons.extension, color: Color(0xFF818CF8)),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  model.name,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  model.path,
+                  style: const TextStyle(
+                    color: Color(0xFF6B7280),
+                    fontSize: 12,
+                    fontFamily: 'monospace',
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.delete_outline, color: Color(0xFFEF4444)),
+            onPressed: () => provider.removeModel(model.id),
+            tooltip: "Remove Model",
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmptyState(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.extension_off_outlined,
+            size: 64,
+            color: AppTheme.text.withValues(alpha: 0.2),
+          ),
+          const SizedBox(height: 16),
+          ModernLabel(
+            "No AI models loaded",
+            color: AppTheme.text.withValues(alpha: 0.5),
+            fontSize: 16,
+          ),
+          const SizedBox(height: 24),
+          ModernButton(
+            label: "Add your first model",
+            icon: Icons.add,
+            onPressed: () => _showAddModelDialog(context),
+          ),
+        ],
+      ),
     );
   }
 

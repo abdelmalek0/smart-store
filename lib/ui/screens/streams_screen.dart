@@ -27,56 +27,141 @@ class StreamsScreen extends StatelessWidget {
         const SizedBox(height: 20),
         Expanded(
           child: streamProvider.streams.isEmpty
-              ? Center(
-                  child: ModernLabel(
-                    "No streams added yet.",
-                    color: AppTheme.text.withOpacity(0.5),
-                  ),
-                )
+              ? _buildEmptyState(context)
               : ListView.builder(
                   itemCount: streamProvider.streams.length,
                   itemBuilder: (context, index) {
                     final stream = streamProvider.streams[index];
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: ModernCard(
-                        child: Row(
-                          children: [
-                            Icon(Icons.videocam, color: AppTheme.primary),
-                            const SizedBox(width: 16),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  ModernLabel(
-                                    stream.name,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                  const SizedBox(height: 4),
-                                  ModernLabel(
-                                    stream.url,
-                                    fontSize: 12,
-                                    color: AppTheme.text.withOpacity(0.6),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            IconButton(
-                              icon: const Icon(
-                                Icons.delete,
-                                color: AppTheme.destructive,
-                              ),
-                              onPressed: () =>
-                                  streamProvider.removeStream(stream.id),
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
+                    return _buildCameraCard(context, stream, streamProvider);
                   },
                 ),
         ),
       ],
+    );
+  }
+
+  Widget _buildCameraCard(
+    BuildContext context,
+    stream,
+    RTSPStreamProvider provider,
+  ) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF111827), // Dark slate/black card bg
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFF1F2937)),
+      ),
+      child: Row(
+        children: [
+          // Thumbnail
+          Container(
+            width: 80,
+            height: 60,
+            decoration: BoxDecoration(
+              color: Colors.black,
+              borderRadius: BorderRadius.circular(8),
+              image: const DecorationImage(
+                image: NetworkImage(
+                  "https://placeholder.com/150",
+                ), // Placeholder
+                fit: BoxFit.cover,
+                opacity: 0.6,
+              ),
+            ),
+          ),
+          const SizedBox(width: 16),
+
+          // Info
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  stream.name,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1F2937),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        stream.url,
+                        style: const TextStyle(
+                          color: Color(0xFF6B7280),
+                          fontSize: 11,
+                          fontFamily: 'monospace',
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+
+          // Actions
+          Row(
+            children: [
+              IconButton(
+                icon: const Icon(Icons.settings, color: Color(0xFF94A3B8)),
+                onPressed: () {},
+                tooltip: "Settings",
+              ),
+              IconButton(
+                icon: const Icon(
+                  Icons.delete_outline,
+                  color: Color(0xFFEF4444),
+                ),
+                onPressed: () => provider.removeStream(stream.id),
+                tooltip: "Remove Camera",
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmptyState(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.videocam_off_outlined,
+            size: 64,
+            color: AppTheme.text.withValues(alpha: 0.2),
+          ),
+          const SizedBox(height: 16),
+          ModernLabel(
+            "No cameras connected",
+            color: AppTheme.text.withValues(alpha: 0.5),
+            fontSize: 16,
+          ),
+          const SizedBox(height: 24),
+          ModernButton(
+            label: "Add your first stream",
+            icon: Icons.add,
+            onPressed: () => _showAddStreamDialog(context),
+          ),
+        ],
+      ),
     );
   }
 
@@ -87,30 +172,34 @@ class StreamsScreen extends StatelessWidget {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: AppTheme.surface,
-        title: const ModernLabel(
-          "Add RTSP Stream",
-          fontSize: 18,
-          fontWeight: FontWeight.bold,
+        backgroundColor: const Color(0xFF1E293B), // Slate-800
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        title: const Text(
+          "Add New Camera",
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
         ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            ModernInput(
-              hint: "Stream Name (Optional)",
-              controller: nameController,
-            ),
-            const SizedBox(height: 12),
-            ModernInput(hint: "rtsp://...", controller: urlController),
+            _buildDialogInput(nameController, "Camera Name (e.g. Entrance)"),
+            const SizedBox(height: 16),
+            _buildDialogInput(urlController, "RTSP URL (rtsp://...)"),
           ],
         ),
         actions: [
           TextButton(
-            child: const Text("Cancel"),
+            child: const Text(
+              "Cancel",
+              style: TextStyle(color: Color(0xFF94A3B8)),
+            ),
             onPressed: () => Navigator.pop(context),
           ),
-          TextButton(
-            child: const Text("Add", style: TextStyle(color: AppTheme.accent)),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF2563EB),
+              foregroundColor: Colors.white,
+            ),
+            child: const Text("Connect"),
             onPressed: () {
               if (urlController.text.isNotEmpty) {
                 Provider.of<RTSPStreamProvider>(
@@ -127,6 +216,27 @@ class StreamsScreen extends StatelessWidget {
             },
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildDialogInput(TextEditingController controller, String hint) {
+    return TextField(
+      controller: controller,
+      style: const TextStyle(color: Colors.white),
+      decoration: InputDecoration(
+        hintText: hint,
+        hintStyle: const TextStyle(color: Color(0xFF64748B)),
+        filled: true,
+        fillColor: const Color(0xFF0F172A), // Slate-900
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide.none,
+        ),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 14,
+        ),
       ),
     );
   }

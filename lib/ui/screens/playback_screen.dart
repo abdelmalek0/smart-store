@@ -7,6 +7,7 @@ import 'package:smart_store_linux/ui/providers/inference_provider.dart';
 import 'package:smart_store_linux/ui/widgets/modern_widgets.dart';
 import 'package:smart_store_linux/ui/widgets/detached_stream_player.dart';
 import 'package:smart_store_linux/backend/streaming/pipeline/stream_manager.dart';
+import 'package:smart_store_linux/ui/widgets/live/camera_sidebar.dart';
 
 class PlaybackScreen extends StatefulWidget {
   const PlaybackScreen({super.key});
@@ -17,6 +18,7 @@ class PlaybackScreen extends StatefulWidget {
 
 class _PlaybackScreenState extends State<PlaybackScreen> {
   String? _selectedStreamId;
+  bool _isSidebarOpen = true;
 
   @override
   Widget build(BuildContext context) {
@@ -56,122 +58,203 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
               );
             }
 
+            // Auto-select first stream if none selected
+            if (_selectedStreamId == null &&
+                streamProvider.streams.isNotEmpty) {
+              // Schedule microtask to avoid setState during build if needed,
+              // but for local state init it's often okay or better handled in initState.
+              // Used local var init logic here for simplicity.
+              _selectedStreamId = streamProvider.streams.first.id;
+            }
+
+            final selectedStream = streamProvider.streams.firstWhere(
+              (s) => s.id == _selectedStreamId,
+              orElse: () => streamProvider.streams.first,
+            );
+
             return Row(
               children: [
-                // Stream Switcher (Left Side)
-                Container(
-                  width: 250,
-                  decoration: BoxDecoration(
-                    color: AppTheme.surface,
-                    border: const Border(
-                      right: BorderSide(color: AppTheme.border),
-                    ),
-                  ),
-                  child: Column(
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.all(16.0),
-                        child: ModernLabel(
-                          "Cameras",
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      Expanded(
-                        child: ListView.builder(
-                          itemCount: streamProvider.streams.length,
-                          itemBuilder: (context, index) {
-                            final stream = streamProvider.streams[index];
-                            final isSelected = _selectedStreamId == stream.id;
-                            final isRunning =
-                                processManager?.getProcessor(stream.id) != null;
-
-                            return ListTile(
-                              title: Text(
-                                stream.name,
-                                style: const TextStyle(color: Colors.white),
-                              ),
-                              subtitle: Text(
-                                isRunning ? "RTSP: Running" : "RTSP: Stopped",
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  color: isRunning
-                                      ? Colors.greenAccent
-                                      : Colors.white.withOpacity(0.3),
-                                  fontSize: 10,
-                                ),
-                              ),
-                              selected: isSelected,
-                              selectedTileColor: AppTheme.primary.withOpacity(
-                                0.2,
-                              ),
-                              onTap: () {
-                                setState(() {
-                                  _selectedStreamId = stream.id;
-                                });
-                              },
-                              leading: Icon(
-                                Icons.videocam,
-                                color: isSelected
-                                    ? AppTheme.accent
-                                    : (isRunning
-                                          ? Colors.green
-                                          : Colors.white54),
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-                    ],
-                  ),
+                // Collapsible Sidebar
+                CameraSidebar(
+                  streams: streamProvider.streams,
+                  selectedStreamId: _selectedStreamId,
+                  onStreamSelected: (id) =>
+                      setState(() => _selectedStreamId = id),
+                  isOpen: _isSidebarOpen,
+                  processManager: processManager,
                 ),
 
-                // Main Player Area (Right Side)
+                // Main Content Area
                 Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: _selectedStreamId == null
-                        ? const Center(
-                            child: Text(
-                              "Select a camera to view feed",
-                              style: TextStyle(color: Colors.white54),
+                  child: Container(
+                    color: const Color(
+                      0xFF0F1218,
+                    ), // Main background (Darker than sidebar)
+                    child: Column(
+                      children: [
+                        // Top Header Bar
+                        Container(
+                          height: 60,
+                          padding: const EdgeInsets.symmetric(horizontal: 24),
+                          decoration: const BoxDecoration(
+                            border: Border(
+                              bottom: BorderSide(
+                                color: Color(0xFF1E293B),
+                              ), // Slate-800
                             ),
-                          )
-                        : Builder(
-                            key: ValueKey(
-                              _selectedStreamId,
-                            ), // Rebuild when stream changes
-                            builder: (context) {
-                              final stream = streamProvider.streams.firstWhere(
-                                (s) => s.id == _selectedStreamId,
-                              );
-
-                              // Resolve Model Path
-                              String? modelPath;
-                              final modelId = inferenceProvider
-                                  .getModelForStream(stream.id);
-                              if (modelId != null) {
-                                try {
-                                  final modelInfo = modelProvider.models
-                                      .firstWhere((m) => m.id == modelId);
-                                  modelPath = modelInfo.path;
-                                } catch (_) {}
-                              }
-
-                              return DetachedStreamPlayer(
-                                url: stream.url,
-                                streamId: stream.id,
-                                label: stream.name,
-                                modelPath: modelPath,
-                              );
-                            },
                           ),
+                          child: Row(
+                            children: [
+                              // Live Status Indicator
+                              Container(
+                                width: 8,
+                                height: 8,
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFEF4444), // Red-500
+                                  shape: BoxShape.circle,
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: const Color(
+                                        0xFFEF4444,
+                                      ).withOpacity(0.5),
+                                      blurRadius: 6,
+                                      spreadRadius: 1,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Text(
+                                "Live Feed: ${selectedStream.name}",
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14,
+                                ),
+                              ),
+
+                              const Spacer(),
+
+                              // Expand Button (Toggle Sidebar)
+                              _buildHeaderButton(
+                                _isSidebarOpen
+                                    ? Icons.fullscreen
+                                    : Icons.fullscreen_exit,
+                                _isSidebarOpen ? "Expand" : "Collapse",
+                                () {
+                                  setState(() {
+                                    _isSidebarOpen = !_isSidebarOpen;
+                                  });
+                                },
+                                highlight: true,
+                              ),
+                            ],
+                          ),
+                        ),
+
+                        // Video Player Area
+                        Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.all(24.0),
+                            child: LayoutBuilder(
+                              builder: (context, constraints) {
+                                // Resolve Model Path
+                                String? modelPath;
+                                final modelId = inferenceProvider
+                                    .getModelForStream(selectedStream.id);
+                                if (modelId != null) {
+                                  try {
+                                    final modelInfo = modelProvider.models
+                                        .firstWhere((m) => m.id == modelId);
+                                    modelPath = modelInfo.path;
+                                  } catch (_) {}
+                                }
+
+                                return Center(
+                                  child: AspectRatio(
+                                    aspectRatio:
+                                        16 /
+                                        9, // Enforce 16:9 for cinematic look
+                                    child: Container(
+                                      decoration: BoxDecoration(
+                                        color: Colors.black,
+                                        borderRadius: BorderRadius.circular(8),
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: Colors.black.withOpacity(
+                                              0.5,
+                                            ),
+                                            blurRadius: 20,
+                                            offset: const Offset(0, 10),
+                                          ),
+                                        ],
+                                      ),
+                                      clipBehavior: Clip.antiAlias,
+                                      child: DetachedStreamPlayer(
+                                        key: ValueKey(selectedStream.id),
+                                        url: selectedStream.url,
+                                        streamId: selectedStream.id,
+                                        label: selectedStream.name,
+                                        modelPath: modelPath,
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ],
             );
           },
+    );
+  }
+
+  Widget _buildHeaderButton(
+    IconData icon,
+    String label,
+    VoidCallback onTap, {
+    bool highlight = false,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(6),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        decoration: BoxDecoration(
+          color: highlight
+              ? const Color(0xFF3B82F6)
+              : Colors.transparent, // Blue or Transparent
+          border: highlight
+              ? null
+              : Border.all(color: const Color(0xFF334155)), // Slate-700
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              icon,
+              size: 16,
+              color: highlight ? Colors.white : const Color(0xFF94A3B8),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              label,
+              style: TextStyle(
+                color: highlight
+                    ? Colors.white
+                    : const Color(0xFF94A3B8), // Slate-400
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

@@ -38,10 +38,11 @@ class _ConfigurationScreenState extends State<ConfigurationScreen> {
               ? Center(
                   child: ModernLabel(
                     "No streams available. Go to Streams to add one.",
-                    color: AppTheme.text.withOpacity(0.5),
+                    color: AppTheme.text.withValues(alpha: 0.5),
                   ),
                 )
               : ListView.builder(
+                  padding: const EdgeInsets.symmetric(horizontal: 24),
                   itemCount: streamProvider.streams.length,
                   itemBuilder: (context, index) {
                     final stream = streamProvider.streams[index];
@@ -50,99 +51,155 @@ class _ConfigurationScreenState extends State<ConfigurationScreen> {
                     final activePluginId = ConfigService.instance
                         .getStreamActivePlugin(stream.id);
 
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: ModernCard(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Icon(
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      padding: const EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        color: const Color(
+                          0xFF111827,
+                        ), // Dark slate/black card bg
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFF1F2937)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF1F2937),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: const Icon(
                                   Icons.settings_input_component,
-                                  color: AppTheme.primary,
+                                  color: Color(0xFF60A5FA),
+                                  size: 20,
                                 ),
-                                const SizedBox(width: 12),
-                                ModernLabel(
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                child: Text(
                                   stream.name,
-                                  fontWeight: FontWeight.bold,
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.white,
+                                  ),
                                 ),
-                              ],
-                            ),
-                            const SizedBox(height: 16),
-                            ModernLabel(
-                              "Active Plugin:",
-                              fontSize: 12,
-                              color: AppTheme.text.withOpacity(0.7),
-                            ),
-                            const SizedBox(height: 8),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
                               ),
-                              decoration: BoxDecoration(
-                                color: AppTheme.background,
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: AppTheme.surface),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 4,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF1F2937),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  "ID: ${stream.id.substring(0, 4)}...",
+                                  style: const TextStyle(
+                                    fontFamily: 'monospace',
+                                    fontSize: 11,
+                                    color: Color(0xFF6B7280),
+                                  ),
+                                ),
                               ),
-                              child: DropdownButtonHideUnderline(
-                                child: DropdownButton<String>(
-                                  value:
-                                      _availablePlugins.any(
-                                        (p) => p['id'] == activePluginId,
-                                      )
-                                      ? activePluginId
-                                      : null, // Default to null (None)
-                                  isExpanded: true,
-                                  dropdownColor: AppTheme.surface,
-                                  hint: Text(
-                                    "None",
-                                    style: TextStyle(
-                                      color: AppTheme.text.withOpacity(0.5),
+                            ],
+                          ),
+                          const SizedBox(height: 20),
+
+                          Row(
+                            children: [
+                              const Text(
+                                "Active Plugin:",
+                                style: TextStyle(
+                                  color: Color(0xFF9CA3AF),
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: const Color(
+                                      0xFF0F172A,
+                                    ), // Darker input bg
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(
+                                      color: const Color(0xFF334155),
                                     ),
                                   ),
-                                  icon: const Icon(
-                                    Icons.arrow_drop_down,
-                                    color: AppTheme.text,
-                                  ),
-                                  style: const TextStyle(color: AppTheme.text),
-                                  items: [
-                                    const DropdownMenuItem<String>(
-                                      value: null,
-                                      child: Text("None"),
-                                    ),
-                                    ..._availablePlugins.map((plugin) {
-                                      final isEnabled =
-                                          plugin['id'] != 'coming_soon';
-                                      return DropdownMenuItem<String>(
-                                        value: plugin['id'],
-                                        enabled: isEnabled,
-                                        child: Text(
-                                          plugin['name']!,
-                                          style: TextStyle(
-                                            color: isEnabled
-                                                ? Colors.white
-                                                : Colors.grey,
-                                          ),
+                                  child: DropdownButtonHideUnderline(
+                                    child: DropdownButton<String>(
+                                      value:
+                                          _availablePlugins.any(
+                                            (p) => p['id'] == activePluginId,
+                                          )
+                                          ? activePluginId
+                                          : null, // Default to null (None)
+                                      isExpanded: true,
+                                      dropdownColor: const Color(0xFF1E293B),
+                                      hint: const Text(
+                                        "None",
+                                        style: TextStyle(
+                                          color: Color(0xFF64748B),
+                                          fontSize: 13,
                                         ),
-                                      );
-                                    }).toList(),
-                                  ],
-                                  onChanged: (value) async {
-                                    await ConfigService.instance
-                                        .setStreamActivePlugin(
-                                          stream.id,
-                                          value,
-                                        );
-                                    setState(
-                                      () {},
-                                    ); // Rebuild to show selection
-                                  },
+                                      ),
+                                      icon: const Icon(
+                                        Icons.keyboard_arrow_down,
+                                        color: Color(0xFF94A3B8),
+                                      ),
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 13,
+                                      ),
+                                      items: [
+                                        const DropdownMenuItem<String>(
+                                          value: null,
+                                          child: Text("None"),
+                                        ),
+                                        ..._availablePlugins.map((plugin) {
+                                          final isEnabled =
+                                              plugin['id'] != 'coming_soon';
+                                          return DropdownMenuItem<String>(
+                                            value: plugin['id'],
+                                            enabled: isEnabled,
+                                            child: Text(
+                                              plugin['name']!,
+                                              style: TextStyle(
+                                                color: isEnabled
+                                                    ? Colors.white
+                                                    : Colors.grey,
+                                              ),
+                                            ),
+                                          );
+                                        }).toList(),
+                                      ],
+                                      onChanged: (value) async {
+                                        await ConfigService.instance
+                                            .setStreamActivePlugin(
+                                              stream.id,
+                                              value,
+                                            );
+                                        setState(
+                                          () {},
+                                        ); // Rebuild to show selection
+                                      },
+                                    ),
+                                  ),
                                 ),
                               ),
-                            ),
-                          ],
-                        ),
+                            ],
+                          ),
+                        ],
                       ),
                     );
                   },

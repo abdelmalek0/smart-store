@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:smart_store_linux/ui/theme/app_theme.dart';
 import 'package:smart_store_linux/ui/providers/app_provider.dart';
 import 'package:smart_store_linux/ui/providers/rtsp_stream_provider.dart';
 import 'package:smart_store_linux/ui/widgets/modern_widgets.dart';
@@ -18,253 +17,374 @@ class DashboardScreen extends StatelessWidget {
     final inferenceProvider = Provider.of<InferenceProvider>(
       context,
       listen: false,
-    ); // Access without listen if only reading for start
+    );
     final modelProvider = Provider.of<ModelProvider>(context, listen: false);
 
-    return CustomScrollView(
-      slivers: [
-        SliverToBoxAdapter(
-          child: Column(
-            children: [
-              const ModernHeader(
-                title: "Dashboard",
-                subtitle: "System overview and controls",
-              ),
-              const SizedBox(height: 20),
-              // System Monitoring (2-line format)
-              ModernCard(
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const ModernLabel(
-                      "System Monitoring",
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      "Note: Metrics are system-wide (app-specific monitoring not available)",
-                      style: TextStyle(
-                        fontSize: 10,
-                        color: AppTheme.text.withValues(alpha: 0.5),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    // Line 1: CPU
-                    Row(
-                      children: [
-                        SizedBox(
-                          width: 120,
-                          child: Text(
-                            "CPU",
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.blueAccent,
-                            ),
-                          ),
-                        ),
-                        Expanded(
-                          flex: 3,
-                          child: Text(
-                            appProvider.cpuName,
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: AppTheme.text.withValues(alpha: 0.8),
-                            ),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        SizedBox(
-                          width: 80,
-                          child: Text(
-                            "${appProvider.stats['cpu']?.toStringAsFixed(1)}%",
-                            style: const TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.blueAccent,
-                            ),
-                            textAlign: TextAlign.right,
-                          ),
-                        ),
-                        const SizedBox(width: 16),
-                        SizedBox(
-                          width: 100,
-                          child: Text(
-                            "${appProvider.stats['ram']?.toStringAsFixed(1)} GB RAM",
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: AppTheme.text.withValues(alpha: 0.7),
-                            ),
-                            textAlign: TextAlign.right,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    // Line 2: GPU
-                    Row(
-                      children: [
-                        SizedBox(
-                          width: 120,
-                          child: Text(
-                            "GPU",
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.purpleAccent,
-                            ),
-                          ),
-                        ),
-                        Expanded(
-                          flex: 3,
-                          child: Text(
-                            appProvider.gpuName,
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: AppTheme.text.withValues(alpha: 0.8),
-                            ),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        SizedBox(
-                          width: 80,
-                          child: Text(
-                            "${appProvider.stats['gpu']?.toStringAsFixed(1)}%",
-                            style: const TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.purpleAccent,
-                            ),
-                            textAlign: TextAlign.right,
-                          ),
-                        ),
-                        const SizedBox(width: 16),
-                        SizedBox(
-                          width: 100,
-                          child: Text(
-                            "${appProvider.vramUsage.toStringAsFixed(1)} / ${appProvider.vramTotal.toStringAsFixed(1)} GB",
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: AppTheme.text.withValues(alpha: 0.7),
-                            ),
-                            textAlign: TextAlign.right,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 20),
-            ],
+    return SingleChildScrollView(
+      child: Column(
+        children: [
+          const ModernHeader(
+            title: "System Dashboard",
+            subtitle: "Global Overview & Health",
           ),
-        ),
-        // Main Controls
-        SliverFillRemaining(
-          hasScrollBody: false,
-          child: ModernCard(
+          Padding(
+            padding: const EdgeInsets.all(24.0),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const ModernLabel(
-                  "Engine Controls",
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
-                const SizedBox(height: 20),
-                ModernButton(
-                  label: appProvider.isEngineRunning
-                      ? "Stop Engine"
-                      : "Start Engine",
-                  isDestructive: appProvider.isEngineRunning,
-                  onPressed: () async {
-                    final shouldRun = !appProvider.isEngineRunning;
-                    appProvider.toggleEngine();
-                    if (shouldRun) {
-                      StreamProcessManager.instance.startAll(
-                        streamProvider.streams,
-                        inferenceProvider.streamModelMap,
-                        modelProvider.models,
+                // 2. Main Content Grid
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    // Responsive layout: Row on wide screens, Column on narrow
+                    if (constraints.maxWidth > 900) {
+                      return Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            flex: 2,
+                            child: _buildSystemHealthCard(appProvider),
+                          ),
+                        ],
                       );
                     } else {
-                      await StreamProcessManager.instance.stopAll();
+                      return Column(
+                        children: [_buildSystemHealthCard(appProvider)],
+                      );
                     }
                   },
-                  icon: appProvider.isEngineRunning
-                      ? Icons.stop
-                      : Icons.play_arrow,
                 ),
-                const SizedBox(height: 20),
-                Divider(color: Colors.white.withValues(alpha: 0.1)),
                 const SizedBox(height: 10),
-                _buildStatusRow(
-                  "Active Streams",
-                  "${streamProvider.streams.length}",
-                ),
-                _buildStatusRow(
-                  "Engine Status",
-                  appProvider.isEngineRunning ? "Running" : "Stopped",
+                // 1. Top Stats Row
+                _buildStatsRow(
+                  context,
+                  appProvider,
+                  streamProvider,
+                  inferenceProvider,
+                  modelProvider,
                 ),
               ],
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
-  Widget _buildStatCard(
-    String title,
-    String value,
-    String subtitle,
-    Color color,
+  Widget _buildStatsRow(
+    BuildContext context,
+    AppProvider appProvider,
+    RTSPStreamProvider streamProvider,
+    InferenceProvider inferenceProvider,
+    ModelProvider modelProvider,
   ) {
-    return ModernCard(
-      padding: const EdgeInsets.all(20),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final wide = constraints.maxWidth > 800;
+        // 3 items per row on wide, spacing 16. Total spacing = 16 * 2 = 32.
+        // final cardWidth = wide
+        //     ? (constraints.maxWidth - 32) / 3
+        //     : (constraints.maxWidth - 16) / 2;
+        final cardWidth = (constraints.maxWidth - 32) / 3;
+
+        return Wrap(
+          spacing: 16,
+          runSpacing: 16,
+          children: [
+            _buildStatCard(
+              title: "Cameras",
+              value: "${streamProvider.streams.length}",
+              icon: Icons.videocam,
+              color: Colors.blueAccent,
+              width: cardWidth,
+            ),
+            _buildStatCard(
+              title: "AI Models",
+              value: "${modelProvider.models.length}",
+              icon: Icons.extension,
+              color: Colors.purpleAccent,
+              width: cardWidth,
+            ),
+            _buildStatCard(
+              title: "Plugins",
+              value: "2",
+              icon: Icons.layers,
+              color: Colors.orangeAccent,
+              width: cardWidth,
+            ),
+            _buildControlCard(
+              context,
+              appProvider,
+              streamProvider,
+              inferenceProvider,
+              modelProvider,
+              width: cardWidth,
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildStatCard({
+    required String title,
+    required String value,
+    required IconData icon,
+    required Color color,
+    required double width,
+  }) {
+    return Container(
+      width: width,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF111827),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFF1F2937)),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          ModernLabel(title, color: AppTheme.text.withValues(alpha: 0.7)),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                title,
+                style: const TextStyle(
+                  color: Color(0xFF9CA3AF),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              Icon(icon, color: color, size: 18),
+            ],
+          ),
           const SizedBox(height: 10),
           Text(
             value,
-            style: TextStyle(
-              fontSize: 28,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 18,
               fontWeight: FontWeight.bold,
-              color: color,
             ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            subtitle,
-            style: TextStyle(
-              fontSize: 12,
-              color: AppTheme.text.withValues(alpha: 0.5),
-            ),
-            overflow: TextOverflow.ellipsis,
-            maxLines: 2,
           ),
         ],
       ),
     );
   }
 
-  Widget _buildStatusRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+  Widget _buildControlCard(
+    BuildContext context,
+    AppProvider appProvider,
+    RTSPStreamProvider streamProvider,
+    InferenceProvider inferenceProvider,
+    ModelProvider modelProvider, {
+    required double width,
+  }) {
+    final isRunning = appProvider.isEngineRunning;
+    return Container(
+      width: width,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: isRunning
+              ? [const Color(0xFF064E3B), const Color(0xFF065F46)]
+              : [const Color(0xFF1F2937), const Color(0xFF111827)],
+        ),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isRunning ? const Color(0xFF059669) : const Color(0xFF374151),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          ModernLabel(label),
-          ModernLabel(
-            value,
-            fontWeight: FontWeight.bold,
-            color: AppTheme.primary,
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                "Engine Status",
+                style: TextStyle(
+                  color: Colors.white70,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(
+                  color: isRunning ? const Color(0xFF34D399) : Colors.red,
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: (isRunning ? const Color(0xFF34D399) : Colors.red)
+                          .withValues(alpha: 0.6),
+                      blurRadius: 4,
+                      spreadRadius: 2,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          InkWell(
+            onTap: () async {
+              final shouldRun = !appProvider.isEngineRunning;
+              appProvider.toggleEngine();
+              if (shouldRun) {
+                StreamProcessManager.instance.startAll(
+                  streamProvider.streams,
+                  inferenceProvider.streamModelMap,
+                  modelProvider.models,
+                );
+              } else {
+                await StreamProcessManager.instance.stopAll();
+              }
+            },
+            child: Row(
+              children: [
+                Text(
+                  isRunning ? "RUNNING" : "STOPPED",
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const Spacer(),
+                Icon(
+                  isRunning
+                      ? Icons.stop_circle_outlined
+                      : Icons.play_circle_outline,
+                  color: Colors.white,
+                  size: 20,
+                ),
+              ],
+            ),
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildSystemHealthCard(AppProvider appProvider) {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: const Color(0xFF111827),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFF1F2937)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            "System Health",
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 20),
+
+          // CPU
+          _buildResourceBar(
+            "CPU Usage",
+            appProvider.cpuName,
+            appProvider.stats['cpu'] ?? 0,
+            Colors.blueAccent,
+          ),
+          const SizedBox(height: 15),
+
+          // RAM
+          _buildResourceBar(
+            "RAM Usage",
+            "${appProvider.stats['ram']?.toStringAsFixed(1)} GB",
+            ((appProvider.stats['ram'] ?? 0) / 16.0) *
+                100, // Assuming 16GB total for visualization
+            Colors.orangeAccent,
+          ),
+          const SizedBox(height: 15),
+
+          // GPU
+          _buildResourceBar(
+            "GPU Usage",
+            appProvider.gpuName,
+            appProvider.stats['gpu'] ?? 0,
+            Colors.greenAccent,
+          ),
+          const SizedBox(height: 15),
+
+          // VRAM
+          _buildResourceBar(
+            "VRAM",
+            "${appProvider.vramUsage.toStringAsFixed(1)} / ${appProvider.vramTotal.toStringAsFixed(1)} GB",
+            appProvider.vramTotal > 0
+                ? (appProvider.vramUsage / appProvider.vramTotal) * 100
+                : 0,
+            Colors.purpleAccent,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildResourceBar(
+    String label,
+    String detail,
+    double percentage,
+    Color color,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              label,
+              style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 13),
+            ),
+            Text(
+              detail,
+              style: const TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Stack(
+          children: [
+            Container(
+              height: 8,
+              width: double.infinity,
+              decoration: BoxDecoration(
+                color: const Color(0xFF374151),
+                borderRadius: BorderRadius.circular(4),
+              ),
+            ),
+            FractionallySizedBox(
+              widthFactor: (percentage / 100).clamp(0.0, 1.0),
+              child: Container(
+                height: 8,
+                decoration: BoxDecoration(
+                  color: color,
+                  borderRadius: BorderRadius.circular(4),
+                  boxShadow: [
+                    BoxShadow(
+                      color: color.withValues(alpha: 0.5),
+                      blurRadius: 6,
+                      spreadRadius: 0,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
     );
   }
 }
