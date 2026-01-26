@@ -7,7 +7,11 @@ import 'package:smart_store_linux/ui/screens/dashboard_screen.dart';
 import 'package:smart_store_linux/ui/screens/models_screen.dart';
 import 'package:smart_store_linux/ui/screens/streams_screen.dart';
 import 'package:smart_store_linux/ui/screens/configuration_screen.dart';
+
 import 'package:smart_store_linux/ui/screens/playback_screen.dart';
+import 'package:smart_store_linux/ui/widgets/tabs/plugins_tab.dart';
+import 'package:smart_store_linux/ui/widgets/tabs/events_tab.dart';
+import 'package:smart_store_linux/backend/streaming/pipeline/stream_manager.dart';
 
 class MainLayout extends StatefulWidget {
   const MainLayout({super.key});
@@ -23,8 +27,15 @@ class _MainLayoutState extends State<MainLayout> {
     const DashboardScreen(),
     const ModelsScreen(),
     const StreamsScreen(),
+    PluginsTab(
+      onModelChanged: (pluginName, modelPath) async {
+        // Global update logic or notify
+        debugPrint("Global model updated for $pluginName: $modelPath");
+      },
+    ),
     const ConfigurationScreen(),
     const PlaybackScreen(),
+    const EventsTab(),
   ];
 
   @override
@@ -47,7 +58,10 @@ class _MainLayoutState extends State<MainLayout> {
                   child: Container(
                     color: AppTheme.background,
                     padding: const EdgeInsets.all(20.0),
-                    child: _screens[_selectedIndex],
+                    child: IndexedStack(
+                      index: _selectedIndex,
+                      children: _screens,
+                    ),
                   ),
                 ),
                 // Footer

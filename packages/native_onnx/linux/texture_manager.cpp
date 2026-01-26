@@ -39,12 +39,6 @@ static void loadGLFunctions() {
     glDeleteBuffers_ptr = (PFNGLDELETEBUFFERSPROC)glXGetProcAddressARB((const GLubyte*)"glDeleteBuffers");
     
     gl_funcs_loaded = true;
-    
-    if (glGenBuffers_ptr && glBindBuffer_ptr && glBufferData_ptr) {
-        std::cout << "[TextureManager] ✓ OpenGL PBO functions loaded" << std::endl;
-    } else {
-        std::cerr << "[TextureManager] ⚠ Some PBO functions not available" << std::endl;
-    }
 }
 
 namespace texture_manager {
@@ -54,9 +48,7 @@ TextureManager& TextureManager::getInstance() {
     return instance;
 }
 
-TextureManager::TextureManager() {
-    std::cout << "[TextureManager] Initializing with CUDA-GL interop support..." << std::endl;
-}
+TextureManager::TextureManager() {}
 
 TextureManager::~TextureManager() {
     std::lock_guard<std::mutex> lock(map_mutex_);
@@ -425,56 +417,14 @@ cpu_fallback:
         glBindTexture(GL_TEXTURE_2D, 0);
         glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
         
-        // CRITICAL: Ensure GL commands are flushed before Flutter samples the texture
-        // This prevents rendering artifacts (black/garbage frames)
+        // Ensure GL commands complete before Flutter samples
         glFlush();
         
         info->has_valid_frame = true;
         return true;
     }
     
-    // 3. PATH B: CUDA-GL INTEROP (Zero-Copy)
-    
-    // Resize GL texture if needed
-    if (frame_to_upload.cols != info->gl_width || frame_to_upload.rows != info->gl_height) {
-        cudaGraphicsUnregisterResource(info->cuda_resource);
-        
-        glBindTexture(GL_TEXTURE_2D, info->gl_texture_id);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, frame_to_upload.cols, frame_to_upload.rows,
-                     0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
-        glBindTexture(GL_TEXTURE_2D, 0);
-        
-        info->gl_width = frame_to_upload.cols;
-        info->gl_height = frame_to_upload.rows;
-        
-        if (!registerCudaInterop(info)) {
-            info->interop_registered = false; // Fallback next time
-            return false;
-        }
-    }
-    
-    // Map & Copy
-    cudaError_t err = cudaGraphicsMapResources(1, &info->cuda_resource, 0);
-    if (err != cudaSuccess) return false;
-    
-    cudaArray_t cuda_array;
-    err = cudaGraphicsSubResourceGetMappedArray(&cuda_array, info->cuda_resource, 0, 0);
-    if (err == cudaSuccess) {
-        cudaMemcpy2DToArray(
-            cuda_array, 0, 0,
-            frame_to_upload.data, frame_to_upload.step,
-            frame_to_upload.cols * 4, frame_to_upload.rows,
-            cudaMemcpyDeviceToDevice
-        );
-    }
-    
-    cudaGraphicsUnmapResources(1, &info->cuda_resource, 0);
-    
-    info->width = frame_to_upload.cols;
-    info->height = frame_to_upload.rows;
-    info->has_valid_frame = true;
-    
-    return true;
+    return false;  // Should not reach here
 }
 
 // ========================================

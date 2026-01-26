@@ -84,67 +84,25 @@ class StreamProcessManager extends ChangeNotifier {
     await InferenceService.instance.init();
 
     for (var stream in streams) {
-      // Find model for this stream
-      String? modelPath;
-
-      // 1. Check override map (runtime args)
-      if (streamModelMap.containsKey(stream.id)) {
-        final modelId = streamModelMap[stream.id];
-        try {
-          final model = models.firstWhere((m) => m.id == modelId);
-          modelPath = model.path;
-          // Also save this preference
-          ConfigService.instance.setModelForStream(stream.id, modelPath);
-        } catch (_) {}
-      }
-      // 2. Check Persistent Config
-      else {
-        final savedId = ConfigService.instance.getModelForStream(stream.id);
-        if (savedId != null) {
-          try {
-            final model = models.firstWhere((m) => m.id == savedId);
-            modelPath = model.path;
-          } catch (_) {
-            // If lookup fails, check if it looks like a legacy path
-            if (savedId.contains("/") || savedId.contains("\\")) {
-              modelPath = savedId;
-            }
-          }
-        }
-
-        // 3. Fallback to stream object default
-        if (modelPath == null && stream.modelPath != null) {
-          modelPath = stream.modelPath;
-        }
+      // Skip if already exists
+      if (_processors.containsKey(stream.id)) {
+        debugPrint("[SKIP] Processor for ${stream.id} already exists");
+        continue;
       }
 
-      if (modelPath != null) {
-        // Skip if already exists
-        if (_processors.containsKey(stream.id)) {
-          debugPrint("[SKIP] Processor for ${stream.id} already exists");
-          continue;
-        }
+      // StreamProcessor will load its own config and model
+      final processor = StreamProcessor(stream: stream);
+      _processors[stream.id] = processor;
 
-        await InferenceService.instance.loadModel(modelPath);
+      // CRITICAL: Log stream initialization
+      debugPrint("[INIT] Stream: ${stream.id}");
 
-        final processor = StreamProcessor(
-          stream: stream,
-          modelPath: modelPath,
-        );
-        _processors[stream.id] = processor;
+      // Await initialization to prevent race conditions/crashes
+      await processor.initialize();
+      notifyListeners();
 
-        // CRITICAL: Log stream initialization
-        debugPrint(
-          "[INIT] Stream: ${stream.id} | Model: ${modelPath.split('/').last}",
-        );
-
-        // Await initialization to prevent race conditions/crashes
-        await processor.initialize();
-        notifyListeners();
-
-        // Stagger startup
-        await Future.delayed(const Duration(milliseconds: 500));
-      }
+      // Stagger startup
+      await Future.delayed(const Duration(milliseconds: 500));
     }
   }
 
@@ -156,35 +114,24 @@ class StreamProcessManager extends ChangeNotifier {
     // But we can support hot-swap if we wanted.
   }
 
-  /// Stop all inference (but keep video playback)
-  void stopAll() {
-    debugPrint(
-      "StreamManager: Stopping inference (keeping video playback)...",
-    );
+  /// Stop all inference and release all resources
+  Future<void> stopAll() async {
+    debugPrint("StreamManager: Stopping engine (full shutdown)...");
 
-    // Freeze all stream processors to stop inference (capture continues)
-    for (var p in _processors.values) {
-      p.freeze(); // Stops inference, keeps showing raw video
-    }
+    // Full destruction of all processors and resources
+    await clearAll();
 
-    // Release the inference service to stop worker isolate
-    InferenceService.instance.release();
-
-    debugPrint(
-      "StreamManager: Inference stopped - showing raw video feeds",
-    );
-
-    // Don't clear _processors - keep them frozen
+    debugPrint("StreamManager: Engine stopped and resources released");
     notifyListeners();
   }
 
   /// Clear all streams and stop all processing
-  void clearAll() {
+  Future<void> clearAll() async {
     debugPrint("StreamManager: Clearing all streams and inference...");
 
     // Dispose all processors
     for (var p in _processors.values) {
-      p.dispose();
+      await p.dispose();
     }
     _processors.clear();
 

@@ -24,6 +24,7 @@ class NativeInferenceService {
   late CreateSession _createSession;
   late ReleaseSession _releaseSession;
   late InferenceShutdown _inferenceShutdown;
+  late NativeForceExit _nativeForceExit;
   late SessionClearInputs _clearInputs;
   late SessionAddInput _addInput;
   late SessionRun _run;
@@ -79,6 +80,10 @@ class NativeInferenceService {
         _inferenceShutdown = _lib!
             .lookupFunction<InferenceShutdownFunc, InferenceShutdown>(
               'Inference_Shutdown',
+            );
+        _nativeForceExit = _lib!
+            .lookupFunction<NativeForceExitFunc, NativeForceExit>(
+              'Native_ForceExit',
             );
         _clearInputs = _lib!
             .lookupFunction<SessionClearInputsFunc, SessionClearInputs>(
@@ -143,6 +148,23 @@ class NativeInferenceService {
     _inferenceShutdown();
     _isInitialized = false;
     _initFuture = null;
+  }
+
+  /// Force immediate exit via C++ _Exit(0)
+  /// This bypasses static destructors and prevents CUDA crashes
+  void forceExit() {
+    // We can force exit as long as the library is loaded,
+    // even if we've already logically shutdown the inference engine
+    debugPrint(
+      "[Native] Force exit check: lib=${_lib != null ? 'loaded' : 'null'}",
+    );
+    if (_lib == null) return;
+    try {
+      _nativeForceExit();
+    } catch (e) {
+      debugPrint("[Native] Force exit failed: $e");
+      exit(0); // Fallback to Dart exit
+    }
   }
 
   /// Run inference on a session

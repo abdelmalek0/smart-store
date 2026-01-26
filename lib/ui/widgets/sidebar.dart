@@ -59,8 +59,14 @@ class _SidebarState extends State<Sidebar> {
           _buildNavItem(0, 'Dashboard', CupertinoIcons.chart_bar_alt_fill),
           _buildNavItem(1, 'Models', CupertinoIcons.cube_box),
           _buildNavItem(2, 'Streams', CupertinoIcons.videocam_fill),
-          _buildNavItem(3, 'Configuration', CupertinoIcons.settings),
-          _buildNavItem(4, 'Playback', CupertinoIcons.play_circle_fill),
+          _buildNavItem(
+            3,
+            'Plugins',
+            CupertinoIcons.bolt_horizontal_circle_fill,
+          ),
+          _buildNavItem(4, 'Configuration', CupertinoIcons.settings),
+          _buildNavItem(5, 'Playback', CupertinoIcons.play_circle_fill),
+          _buildNavItem(6, 'Events', CupertinoIcons.list_bullet),
         ],
       ),
     );

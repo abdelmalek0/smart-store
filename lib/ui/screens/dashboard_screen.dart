@@ -179,7 +179,7 @@ class DashboardScreen extends StatelessWidget {
                       ? "Stop Engine"
                       : "Start Engine",
                   isDestructive: appProvider.isEngineRunning,
-                  onPressed: () {
+                  onPressed: () async {
                     final shouldRun = !appProvider.isEngineRunning;
                     appProvider.toggleEngine();
                     if (shouldRun) {
@@ -189,7 +189,7 @@ class DashboardScreen extends StatelessWidget {
                         modelProvider.models,
                       );
                     } else {
-                      StreamProcessManager.instance.stopAll();
+                      await StreamProcessManager.instance.stopAll();
                     }
                   },
                   icon: appProvider.isEngineRunning

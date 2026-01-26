@@ -2,24 +2,35 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:smart_store_linux/ui/theme/app_theme.dart';
 import 'package:smart_store_linux/ui/providers/rtsp_stream_provider.dart';
-import 'package:smart_store_linux/ui/providers/model_provider.dart';
-import 'package:smart_store_linux/ui/providers/inference_provider.dart';
 import 'package:smart_store_linux/ui/widgets/modern_widgets.dart';
+import 'package:smart_store_linux/backend/services/config_service.dart';
 
-class ConfigurationScreen extends StatelessWidget {
+class ConfigurationScreen extends StatefulWidget {
   const ConfigurationScreen({super.key});
+
+  @override
+  State<ConfigurationScreen> createState() => _ConfigurationScreenState();
+}
+
+class _ConfigurationScreenState extends State<ConfigurationScreen> {
+  // Hardcoded available plugins (should match PluginsTab ideally, or come from a registry)
+  final List<Map<String, String>> _availablePlugins = [
+    {'id': 'people_counting', 'name': 'People Counting'},
+    {'id': 'coming_soon', 'name': 'Heatmap (Coming Soon)'},
+  ];
 
   @override
   Widget build(BuildContext context) {
     final streamProvider = Provider.of<RTSPStreamProvider>(context);
-    final modelProvider = Provider.of<ModelProvider>(context);
-    final inferenceProvider = Provider.of<InferenceProvider>(context);
+
+    // Force rebuild to fetch latest config if needed?
+    // Ideally we listen to a ConfigProvider, but setState on interaction works for now.
 
     return Column(
       children: [
         const ModernHeader(
           title: "Configuration",
-          subtitle: "Map streams to detection models",
+          subtitle: "Map streams to plugins",
         ),
         const SizedBox(height: 20),
         Expanded(
@@ -34,9 +45,10 @@ class ConfigurationScreen extends StatelessWidget {
                   itemCount: streamProvider.streams.length,
                   itemBuilder: (context, index) {
                     final stream = streamProvider.streams[index];
-                    final selectedModelId = inferenceProvider.getModelForStream(
-                      stream.id,
-                    );
+
+                    // Fetch Active Plugin for this stream
+                    final activePluginId = ConfigService.instance
+                        .getStreamActivePlugin(stream.id);
 
                     return Padding(
                       padding: const EdgeInsets.only(bottom: 12),
@@ -59,7 +71,7 @@ class ConfigurationScreen extends StatelessWidget {
                             ),
                             const SizedBox(height: 16),
                             ModernLabel(
-                              "Select Model:",
+                              "Active Plugin:",
                               fontSize: 12,
                               color: AppTheme.text.withOpacity(0.7),
                             ),
@@ -76,11 +88,11 @@ class ConfigurationScreen extends StatelessWidget {
                               child: DropdownButtonHideUnderline(
                                 child: DropdownButton<String>(
                                   value:
-                                      modelProvider.models.any(
-                                        (m) => m.id == selectedModelId,
+                                      _availablePlugins.any(
+                                        (p) => p['id'] == activePluginId,
                                       )
-                                      ? selectedModelId
-                                      : null,
+                                      ? activePluginId
+                                      : null, // Default to null (None)
                                   isExpanded: true,
                                   dropdownColor: AppTheme.surface,
                                   hint: Text(
@@ -99,33 +111,32 @@ class ConfigurationScreen extends StatelessWidget {
                                       value: null,
                                       child: Text("None"),
                                     ),
-                                    ...modelProvider.models.map((model) {
+                                    ..._availablePlugins.map((plugin) {
+                                      final isEnabled =
+                                          plugin['id'] != 'coming_soon';
                                       return DropdownMenuItem<String>(
-                                        value: model.id,
-                                        child: Text(model.name),
+                                        value: plugin['id'],
+                                        enabled: isEnabled,
+                                        child: Text(
+                                          plugin['name']!,
+                                          style: TextStyle(
+                                            color: isEnabled
+                                                ? Colors.white
+                                                : Colors.grey,
+                                          ),
+                                        ),
                                       );
                                     }).toList(),
                                   ],
-                                  onChanged: (value) {
-                                    if (value == null) {
-                                      inferenceProvider.setModelForStream(
-                                        stream.id,
-                                        null,
-                                        null,
-                                      );
-                                    } else {
-                                      try {
-                                        final model = modelProvider.models
-                                            .firstWhere((m) => m.id == value);
-                                        inferenceProvider.setModelForStream(
+                                  onChanged: (value) async {
+                                    await ConfigService.instance
+                                        .setStreamActivePlugin(
                                           stream.id,
                                           value,
-                                          model.path,
                                         );
-                                      } catch (e) {
-                                        debugPrint("Error selecting model: $e");
-                                      }
-                                    }
+                                    setState(
+                                      () {},
+                                    ); // Rebuild to show selection
                                   },
                                 ),
                               ),

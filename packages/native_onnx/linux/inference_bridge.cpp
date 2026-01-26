@@ -7,7 +7,28 @@
 #include <memory>
 #include <mutex>
 #include <algorithm>
+#include <cstdlib>  // for atexit
+#include <atomic>   // for shutdown flag
 #include "texture_manager.h"
+
+// Shutdown state
+static std::atomic<bool> g_shutdown_called{false};
+
+// Signal handler for graceful shutdown
+#include <csignal>
+
+__attribute__((used))
+static void signal_handler(int signum) {
+    if (!g_shutdown_called.load()) {
+        std::cerr << "\n[Native] Signal " << signum << " received - cleaning up..." << std::endl;
+        // Can't call Inference_Shutdown directly from signal handler safely
+        // Just mark shutdown requested and exit quickly
+        g_shutdown_called.store(true);
+    }
+    // Re-raise signal with default handler to exit
+    signal(signum, SIG_DFL);
+    raise(signum);
+}
 
 // CUDA headers for GPU verification
 #ifdef USE_CUDA
@@ -122,15 +143,23 @@ static std::mutex g_video_mutex;     // Only for map operations
 
 static std::mutex g_env_mutex;
 
+
+
 int InitONNX() {
     std::lock_guard<std::mutex> lock(g_env_mutex);
+    // Reset shutdown flag to allow restart
+    g_shutdown_called.store(false);
+    
     try {
         if (!g_env) {
             // Enable VERBOSE logging to see node assignments (CPU vs CUDA)
             g_env = std::make_unique<Ort::Env>(ORT_LOGGING_LEVEL_VERBOSE, "NativeONNX");
             g_allocator = std::make_unique<Ort::AllocatorWithDefaultOptions>();
             
-            std::cout << "[Native] ONNX Runtime initialized with VERBOSE logging" << std::endl;
+            // NOTE: atexit handlers don't work well with Flutter/GTK
+            // Cleanup should be called explicitly via NativeInferenceService.shutdown()
+            
+            std::cout << "[Native] ONNX Runtime initialized" << std::endl;
             
             // ========================================
             // GPU Capability Check
@@ -445,10 +474,17 @@ void ReleaseSession(int64_t session_id) {
 // 2. Release all ONNX sessions (CUDA tensors/memory)
 // 3. Destroy global ONNX environment
 // This prevents "CUDA driver shutting down" crashes on exit.
+
 extern "C" __attribute__((visibility("default"))) __attribute__((used))
 void Inference_Shutdown() {
-    std::cout << "[Native] ========================================" << std::endl;
-    std::cout << "[Native] Shutdown: Releasing all GPU resources..." << std::endl;
+    // Guard against double-shutdown
+    bool expected = false;
+    if (!g_shutdown_called.compare_exchange_strong(expected, true)) {
+        // Already shutting down or shut down
+        return;
+    }
+    
+    std::cout << "[Native] Shutdown: Releasing GPU resources..." << std::endl;
     
     // 1. Release all video contexts first (they hold CUDA HW decoder buffers)
     {
@@ -527,7 +563,20 @@ void Inference_Shutdown() {
 #endif
     
     std::cout << "[Native] Shutdown complete - safe to exit" << std::endl;
-    std::cout << "[Native] ========================================" << std::endl;
+}
+
+
+// Force immediate process termination bypassing static destructors
+// This is necessary because ONNX Runtime's static destructors run after
+// CUDA driver shutdown starts, causing crashes.
+extern "C" __attribute__((visibility("default"))) __attribute__((used))
+void Native_ForceExit() {
+    std::cout << "[Native] Force Exit requested - calling _Exit(0)" << std::endl;
+    // Ensure all streams are flushed
+    std::cout.flush();
+    std::cerr.flush();
+    // Immediate termination
+    std::_Exit(0);
 }
 
 void Session_ClearInputs(int64_t session_id) {

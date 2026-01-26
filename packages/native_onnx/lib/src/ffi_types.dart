@@ -10,6 +10,8 @@ typedef InitONNXFunc = Int32 Function();
 typedef CreateSessionFunc = Int64 Function(Pointer<Utf8> modelPath);
 typedef ReleaseSessionFunc = Void Function(Int64 sessionId);
 typedef InferenceShutdownFunc = Void Function(); // Shutdown all GPU resources
+typedef NativeForceExitFunc =
+    Void Function(); // Force exit bypassing destructors
 typedef SessionClearInputsFunc = Void Function(Int64 id);
 typedef SessionAddInputFunc =
     Void Function(
@@ -73,6 +75,7 @@ typedef InitONNX = int Function();
 typedef CreateSession = int Function(Pointer<Utf8> modelPath);
 typedef ReleaseSession = void Function(int sessionId);
 typedef InferenceShutdown = void Function(); // Shutdown all GPU resources
+typedef NativeForceExit = void Function();
 typedef SessionClearInputs = void Function(int id);
 
 typedef SessionAddInput =

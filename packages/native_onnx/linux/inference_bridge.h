@@ -26,6 +26,9 @@ ONNX_BRIDGE_EXPORT void ReleaseSession(int64_t session_id);
 // This prevents CUDA driver shutdown crashes.
 ONNX_BRIDGE_EXPORT void Inference_Shutdown();
 
+// Force immediate exit (bypasses static destructors)
+ONNX_BRIDGE_EXPORT void Native_ForceExit();
+
 // Clear previously set inputs for the session (preparation for new run)
 ONNX_BRIDGE_EXPORT void Session_ClearInputs(int64_t session_id);
 

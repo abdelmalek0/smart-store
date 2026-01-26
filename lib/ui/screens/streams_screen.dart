@@ -48,7 +48,10 @@ class StreamsScreen extends StatelessWidget {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  ModernLabel(stream.name, fontWeight: FontWeight.bold),
+                                  ModernLabel(
+                                    stream.name,
+                                    fontWeight: FontWeight.bold,
+                                  ),
                                   const SizedBox(height: 4),
                                   ModernLabel(
                                     stream.url,
@@ -59,8 +62,12 @@ class StreamsScreen extends StatelessWidget {
                               ),
                             ),
                             IconButton(
-                              icon: const Icon(Icons.delete, color: AppTheme.destructive),
-                              onPressed: () => streamProvider.removeStream(stream.id),
+                              icon: const Icon(
+                                Icons.delete,
+                                color: AppTheme.destructive,
+                              ),
+                              onPressed: () =>
+                                  streamProvider.removeStream(stream.id),
                             ),
                           ],
                         ),
@@ -76,12 +83,16 @@ class StreamsScreen extends StatelessWidget {
   void _showAddStreamDialog(BuildContext context) {
     final urlController = TextEditingController();
     final nameController = TextEditingController();
-    
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: AppTheme.surface,
-        title: const ModernLabel("Add RTSP Stream", fontSize: 18, fontWeight: FontWeight.bold),
+        title: const ModernLabel(
+          "Add RTSP Stream",
+          fontSize: 18,
+          fontWeight: FontWeight.bold,
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -90,10 +101,7 @@ class StreamsScreen extends StatelessWidget {
               controller: nameController,
             ),
             const SizedBox(height: 12),
-            ModernInput(
-              hint: "rtsp://...",
-              controller: urlController,
-            ),
+            ModernInput(hint: "rtsp://...", controller: urlController),
           ],
         ),
         actions: [
@@ -105,9 +113,14 @@ class StreamsScreen extends StatelessWidget {
             child: const Text("Add", style: TextStyle(color: AppTheme.accent)),
             onPressed: () {
               if (urlController.text.isNotEmpty) {
-                Provider.of<RTSPStreamProvider>(context, listen: false).addStream(
+                Provider.of<RTSPStreamProvider>(
+                  context,
+                  listen: false,
+                ).addStream(
                   urlController.text,
-                  name: nameController.text.isNotEmpty ? nameController.text : null,
+                  name: nameController.text.isNotEmpty
+                      ? nameController.text
+                      : null,
                 );
                 Navigator.pop(context);
               }

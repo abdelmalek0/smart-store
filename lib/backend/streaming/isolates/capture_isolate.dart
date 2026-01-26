@@ -75,18 +75,41 @@ Future<void> _captureLoopAsync(IsolateInitParams params) async {
   videoStream = await openVideo();
 
   try {
+    // Create command port for graceful shutdown
+    final commandPort = ReceivePort();
+    bool isRunning = true;
+
+    // Send initialization message to parent isolate
+    // We send a Map first to provide the command port
+    params.sendPort.send({'type': 'init', 'commandPort': commandPort.sendPort});
+
+    // Listen for commands
+    commandPort.listen((message) {
+      if (message == 'STOP') {
+        debugPrint("🛑 Capture Isolate received STOP command");
+        isRunning = false;
+        commandPort.close();
+      }
+    });
+
     // Main capture loop
-    while (true) {
+    while (isRunning) {
       // Reconnect if stream is not open
       if (videoStream == null) {
+        if (!isRunning) break;
         videoStream = await openVideo();
         if (videoStream == null) {
-          await Future.delayed(const Duration(seconds: 2));
+          // Wait but check running status frequently
+          for (int i = 0; i < 20 && isRunning; i++) {
+            await Future.delayed(const Duration(milliseconds: 100));
+          }
           continue;
         }
       }
 
       try {
+        if (!isRunning) break;
+
         // Get next frame
         final frame = await capture.getFrame(videoStream.streamId);
 
@@ -95,13 +118,6 @@ Future<void> _captureLoopAsync(IsolateInitParams params) async {
 
           // Check if this is an optimized frame with inference results
           if (frame is LinuxOptimizedFrame) {
-            // Linux optimized path: frame + detections together
-            debugPrint(
-              "📦 Optimized frame: ${frame.width}x${frame.height}, "
-              "${frame.detections.length} detections, "
-              "${frame.inferenceTime.toStringAsFixed(1)}ms",
-            );
-
             // Send processed frame message
             final transferable = TransferableTypedData.fromList([frame.data]);
             params.sendPort.send([
@@ -114,7 +130,7 @@ Future<void> _captureLoopAsync(IsolateInitParams params) async {
               frame.inferenceTime,
             ]);
           } else {
-            // Standard frame (Android or Linux without optimized path)
+            // Standard frame
             final transferable = TransferableTypedData.fromList([frame.data]);
             params.sendPort.send([
               'frame',
@@ -128,7 +144,6 @@ Future<void> _captureLoopAsync(IsolateInitParams params) async {
           // No frame available - check watchdog
           final now = DateTime.now().millisecondsSinceEpoch;
           if (now - lastFrameTime > 5000) {
-            // No frames for 5 seconds - reconnect
             debugPrint("⚠️  No frames for 5s, reconnecting...");
             await capture.release(videoStream.streamId);
             videoStream = null;
@@ -140,8 +155,10 @@ Future<void> _captureLoopAsync(IsolateInitParams params) async {
         await Future.delayed(const Duration(milliseconds: 50));
       }
 
-      // Minimal delay for high frame rate
-      await Future.delayed(const Duration(milliseconds: 1));
+      // Minimal delay for high frame rate (check running status)
+      if (isRunning) {
+        await Future.delayed(const Duration(milliseconds: 1));
+      }
     }
   } finally {
     // Cleanup

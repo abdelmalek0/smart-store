@@ -1,4 +1,4 @@
-import 'dart:io' show Platform;
+import 'dart:io' show Platform, exit;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:fvp/fvp.dart' as fvp;
@@ -38,6 +38,12 @@ void main() async {
 
   // Only configure window on desktop platforms
   if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+    await windowManager.ensureInitialized();
+
+    // Initialize Native Inference Service in Main Isolate
+    // This allows the main thread to perform cleanup (videoRelease) and forceExit
+    await NativeInferenceService().init();
+
     WindowOptions windowOptions = const WindowOptions(
       size: Size(1280, 720),
       center: true,
@@ -63,20 +69,43 @@ class VisionLabApp extends StatefulWidget {
 }
 
 class _VisionLabAppState extends State<VisionLabApp>
-    with WidgetsBindingObserver {
+    with WidgetsBindingObserver, WindowListener {
   late LinuxResourceMonitor _monitor;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // Register window listener for proper shutdown
+    if (Platform.isLinux || Platform.isWindows || Platform.isMacOS) {
+      windowManager.addListener(this);
+      windowManager.setPreventClose(true);
+    }
+  }
+
+  @override
+  void onWindowClose() {
+    debugPrint("[App] Window close requested - shutting down...");
+
+    // 1. Shutdown resources
+    _shutdownNativeResources();
+
+    // 2. Force immediate exit from C++ side
+    // This calls _Exit(0) which bypasses all static destructors
+    debugPrint("[App] Calling native forceExit...");
+    NativeInferenceService().forceExit();
+
+    // 3. Fallback: If native exit didn't kill the process, we do it here
+    debugPrint(
+      "[App] Native force exit returned - falling back to Dart exit(0)",
+    );
+    exit(0);
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
     if (state == AppLifecycleState.detached) {
-      // App is being closed - shutdown native resources properly
       _shutdownNativeResources();
     }
   }
@@ -84,11 +113,18 @@ class _VisionLabAppState extends State<VisionLabApp>
   void _shutdownNativeResources() {
     debugPrint("[App] Shutting down native resources...");
     try {
-      // Shutdown native ONNX/CUDA resources before app exit
+      // 1. Stop high-level stream processing logic
+      StreamProcessManager.instance.clearAll();
+
+      // 2. Stop resource monitor
+      _monitor.stop();
+
+      // 3. Shutdown low-level native resources
       NativeInferenceService().shutdown();
+
       debugPrint("[App] Native resources released successfully");
     } catch (e) {
-      debugPrint("[App] Error during native shutdown: $e");
+      debugPrint("[App] Error releasing resources: $e");
     }
   }
 
@@ -139,7 +175,6 @@ class _VisionLabAppState extends State<VisionLabApp>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _monitor.stop();
-    // Also shutdown native resources on dispose
     _shutdownNativeResources();
     super.dispose();
   }
