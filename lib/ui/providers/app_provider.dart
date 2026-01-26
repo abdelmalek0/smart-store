@@ -9,6 +9,7 @@ class AppProvider extends ChangeNotifier {
   String _gpuName = "Detecting...";
   double _vramUsage = 0.0; // GB
   double _vramTotal = 0.0; // GB
+  double _ramTotal = 0.0; // GB
 
   bool get isEngineRunning => _isEngineRunning;
   bool get isSidebarExpanded => _isSidebarExpanded;
@@ -17,6 +18,7 @@ class AppProvider extends ChangeNotifier {
   String get gpuName => _gpuName;
   double get vramUsage => _vramUsage;
   double get vramTotal => _vramTotal;
+  double get ramTotal => _ramTotal;
 
   void toggleEngine() {
     _isEngineRunning = !_isEngineRunning;
@@ -32,12 +34,14 @@ class AppProvider extends ChangeNotifier {
     double? cpu,
     double? gpu,
     double? ram,
+    double? ramTotal,
     double? vram,
     double? vramTotal,
   }) {
     if (cpu != null) _stats['cpu'] = cpu;
     if (gpu != null) _stats['gpu'] = gpu;
     if (ram != null) _stats['ram'] = ram;
+    if (ramTotal != null) _ramTotal = ramTotal;
     if (vram != null) _vramUsage = vram;
     if (vramTotal != null) _vramTotal = vramTotal;
     notifyListeners();

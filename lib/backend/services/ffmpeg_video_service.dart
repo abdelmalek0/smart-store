@@ -43,4 +43,24 @@ class FFmpegVideoService {
       print('FFmpegVideoService.showFrame error: $e');
     }
   }
+
+  static Future<Map<String, double>?> getSystemStats() async {
+    try {
+      final result = await _channel.invokeMethod<Map>('getSystemStats');
+      if (result != null) {
+        // Safe conversion
+        final stats = <String, double>{};
+        result.forEach((key, value) {
+          if (key is String && value is num) {
+            stats[key] = value.toDouble();
+          }
+        });
+        return stats;
+      }
+      return null;
+    } catch (e) {
+      // print('FFmpegVideoService.getSystemStats error: $e'); // Silent fail often on poll
+      return null;
+    }
+  }
 }

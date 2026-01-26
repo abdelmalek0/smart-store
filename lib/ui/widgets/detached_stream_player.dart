@@ -71,36 +71,48 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
       if (externalProcessor != null && externalProcessor.isInitialized) {
         debugPrint("Attached to processor for ${widget.streamId}");
 
-        // Create GPU texture for this stream (Linux platform texture)
-        final textureService = TextureService();
-        final textureResult = await textureService.createVideoTexture(
-          _currentWidth,
-          _currentHeight,
-        );
-
-        if (textureResult != null) {
+        // 1. Check if Processor ALREADY has a native texture (Android Path)
+        if (externalProcessor.nativeVideoId > 0 &&
+            externalProcessor.textureId != null) {
           setState(() {
-            _textureId = textureResult['textureId'];
-            _textureManagerId = textureResult['textureManagerId'];
+            _textureId = externalProcessor.textureId;
+            // _textureManagerId not needed for simple Android texture view
+            debugPrint("[TEXTURE] Using Native Android Texture: $_textureId");
           });
-          debugPrint(
-            "[TEXTURE] Created texture $_textureId (manager: $_textureManagerId)",
-          );
-
-          // Connect stream to texture for automatic frame updates
-          // Use ACTUAL Native Video ID (from Video_Open)
-          final videoId = externalProcessor.nativeVideoId;
-          if (videoId > 0) {
-            await textureService.connectStreamToTexture(
-              videoId,
-              _textureManagerId!,
+        }
+        // 2. If not, try creating a Linux Texture (Zero-Copy Linux Path)
+        else {
+          try {
+            final textureService = TextureService();
+            final textureResult = await textureService.createVideoTexture(
+              _currentWidth,
+              _currentHeight,
             );
-            debugPrint("[TEXTURE] Connected video $videoId to texture");
-          } else {
-            debugPrint("[TEXTURE] Warning: Native Video ID not ready yet!");
+
+            if (textureResult != null) {
+              setState(() {
+                _textureId = textureResult['textureId'];
+                _textureManagerId = textureResult['textureManagerId'];
+              });
+              debugPrint(
+                "[TEXTURE] Created Linux texture $_textureId (manager: $_textureManagerId)",
+              );
+
+              // Connect stream to texture for automatic frame updates
+              final videoId = externalProcessor.nativeVideoId;
+              if (videoId > 0) {
+                await textureService.connectStreamToTexture(
+                  videoId,
+                  _textureManagerId!,
+                );
+                debugPrint("[TEXTURE] Connected video $videoId to texture");
+              }
+            }
+          } catch (e) {
+            debugPrint(
+              "[TEXTURE] Linux Texture creation failed (Expected on Android): $e",
+            );
           }
-        } else {
-          debugPrint("[TEXTURE] Failed to create texture, using CPU fallback");
         }
 
         // Listen to processed frames (for Detections & FPS stats)
@@ -109,8 +121,13 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
 
           // TEXTURE MODE: Synchronized Display (Render-on-Demand)
           if (_textureId != null) {
-            // Linux Texture Mode: Texture is updated natively by inference_bridge
-            // We just need to trigger a repaint via updateTexture later
+            // If we are using Android Native Texture, we MUST call showFrame manually
+            // Linux typically auto-updates via texture manager connection, but
+            // Android one relies on explicit 'showFrame' call in StreamProcessor.
+            if (externalProcessor.textureId != null) {
+              // Android check
+              externalProcessor.showFrame(frame.decodeStartMs);
+            }
 
             // 2. Update UI Overlay immediately
             setState(() {
@@ -137,8 +154,14 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
               }
             });
 
-            // 3. Trigger texture repaint
-            TextureService().updateTexture(_textureId!);
+            // 3. Trigger texture repaint (Linux needs this often, Android usually auto-repaints on draw)
+            // But Android Texture widget might need a notify?
+            // On Android, SurfaceTexture.updateTexImage() is called by Flutter engine when onFrameAvailable.
+            // Our native plugin calls unlockCanvasAndPost which triggers onFrameAvailable.
+            // So we might NOT need to do anything here for Android.
+            if (_textureManagerId != null) {
+              TextureService().updateTexture(_textureId!);
+            }
             return;
           }
 

@@ -79,11 +79,7 @@ class DashboardScreen extends StatelessWidget {
   ) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final wide = constraints.maxWidth > 800;
         // 3 items per row on wide, spacing 16. Total spacing = 16 * 2 = 32.
-        // final cardWidth = wide
-        //     ? (constraints.maxWidth - 32) / 3
-        //     : (constraints.maxWidth - 16) / 2;
         final cardWidth = (constraints.maxWidth - 32) / 3;
 
         return Wrap(
@@ -291,9 +287,20 @@ class DashboardScreen extends StatelessWidget {
           const SizedBox(height: 20),
 
           // CPU
+          Text(
+            appProvider.cpuName,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w600,
+              fontSize: 13,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 4),
           _buildResourceBar(
             "CPU Usage",
-            appProvider.cpuName,
+            "${appProvider.stats['cpu']?.toStringAsFixed(1)}%",
             appProvider.stats['cpu'] ?? 0,
             Colors.blueAccent,
           ),
@@ -302,17 +309,29 @@ class DashboardScreen extends StatelessWidget {
           // RAM
           _buildResourceBar(
             "RAM Usage",
-            "${appProvider.stats['ram']?.toStringAsFixed(1)} GB",
-            ((appProvider.stats['ram'] ?? 0) / 16.0) *
-                100, // Assuming 16GB total for visualization
+            "${appProvider.stats['ram']?.toStringAsFixed(1)} / ${appProvider.ramTotal.toStringAsFixed(1)} GB",
+            appProvider.ramTotal > 0
+                ? ((appProvider.stats['ram'] ?? 0) / appProvider.ramTotal) * 100
+                : 0,
             Colors.orangeAccent,
           ),
           const SizedBox(height: 15),
 
           // GPU
+          Text(
+            appProvider.gpuName,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w600,
+              fontSize: 13,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 4),
           _buildResourceBar(
             "GPU Usage",
-            appProvider.gpuName,
+            "${appProvider.stats['gpu']?.toStringAsFixed(1)}%",
             appProvider.stats['gpu'] ?? 0,
             Colors.greenAccent,
           ),

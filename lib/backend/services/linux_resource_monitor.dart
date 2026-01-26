@@ -6,7 +6,7 @@ import '../../ui/providers/app_provider.dart';
 class LinuxResourceMonitor {
   final AppProvider _provider;
   Timer? _timer;
-  
+
   // Cache for CPU calculation
   int _prevTotal = 0;
   int _prevIdle = 0;
@@ -29,7 +29,12 @@ class LinuxResourceMonitor {
 
     // Detect CPU
     try {
-      final result = await Process.run('grep', ['-m', '1', 'model name', '/proc/cpuinfo']);
+      final result = await Process.run('grep', [
+        '-m',
+        '1',
+        'model name',
+        '/proc/cpuinfo',
+      ]);
       if (result.exitCode == 0) {
         // Output: model name : Intel(R) Core(TM) ...
         final parts = result.stdout.toString().split(':');
@@ -44,7 +49,10 @@ class LinuxResourceMonitor {
     // Detect GPU (Nvidia)
     try {
       // Try nvidia-smi first
-      final result = await Process.run('nvidia-smi', ['--query-gpu=name', '--format=csv,noheader']);
+      final result = await Process.run('nvidia-smi', [
+        '--query-gpu=name',
+        '--format=csv,noheader',
+      ]);
       if (result.exitCode == 0) {
         gpu = result.stdout.toString().trim();
       } else {
@@ -52,7 +60,10 @@ class LinuxResourceMonitor {
         final lspci = await Process.run('lspci', []);
         if (lspci.exitCode == 0) {
           final lines = lspci.stdout.toString().split('\n');
-          final vga = lines.firstWhere((l) => l.contains('VGA'), orElse: () => "");
+          final vga = lines.firstWhere(
+            (l) => l.contains('VGA'),
+            orElse: () => "",
+          );
           if (vga.isNotEmpty) {
             // 01:00.0 VGA compatible controller: NVIDIA Corporation ...
             final index = vga.indexOf(': ');
@@ -72,6 +83,7 @@ class LinuxResourceMonitor {
   Future<void> _fetchStats() async {
     double cpuUsage = 0.0;
     double ramUsage = 0.0;
+    double ramTotal = 0.0;
     double gpuUsage = 0.0;
     double vramUsage = 0.0;
     double vramTotal = 0.0;
@@ -89,9 +101,9 @@ class LinuxResourceMonitor {
             final nice = int.tryParse(parts[2]) ?? 0;
             final system = int.tryParse(parts[3]) ?? 0;
             final idle = int.tryParse(parts[4]) ?? 0;
-            
+
             final total = user + nice + system + idle;
-            
+
             if (_prevTotal != 0) {
               final totalDelta = total - _prevTotal;
               final idleDelta = idle - _prevIdle;
@@ -121,7 +133,7 @@ class LinuxResourceMonitor {
             final total = double.tryParse(parts[1]) ?? 1;
             final used = double.tryParse(parts[2]) ?? 0;
             ramUsage = used / 1024.0; // Convert MB to GB
-            // If you want percentage: (used / total) * 100
+            ramTotal = total / 1024.0;
           }
         }
       }
@@ -132,22 +144,21 @@ class LinuxResourceMonitor {
     // GPU Stats via nvidia-smi
     try {
       // utilization.gpu, memory.used, memory.total
-      final result = await Process.run('nvidia-smi', 
-        ['--query-gpu=utilization.gpu,memory.used,memory.total', '--format=csv,noheader,nounits']);
-      
+      final result = await Process.run('nvidia-smi', [
+        '--query-gpu=utilization.gpu,memory.used,memory.total',
+        '--format=csv,noheader,nounits',
+      ]);
+
       if (result.exitCode == 0) {
         final parts = result.stdout.toString().trim().split(',');
         if (parts.length >= 3) {
           gpuUsage = double.tryParse(parts[0].trim()) ?? 0.0;
           final usedMb = double.tryParse(parts[1].trim()) ?? 0.0;
           final totalMb = double.tryParse(parts[2].trim()) ?? 0.0;
-          
+
           vramUsage = usedMb / 1024.0;
           vramTotal = totalMb / 1024.0;
         }
-      } else {
-        // Fallback or just logs
-        debugPrint("nvidia-smi exited with ${result.exitCode}: ${result.stderr}");
       }
     } catch (e) {
       // GPU monitor might fail if nvidia-smi not present
@@ -156,6 +167,7 @@ class LinuxResourceMonitor {
     _provider.updateStats(
       cpu: cpuUsage,
       ram: ramUsage,
+      ramTotal: ramTotal,
       gpu: gpuUsage,
       vram: vramUsage,
       vramTotal: vramTotal,

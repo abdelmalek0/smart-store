@@ -16,6 +16,7 @@ import 'package:smart_store_linux/ui/providers/inference_provider.dart';
 import 'package:smart_store_linux/ui/screens/main_layout.dart';
 import 'package:smart_store_linux/backend/streaming/pipeline/stream_manager.dart';
 import 'package:smart_store_linux/backend/services/config_service.dart';
+import 'package:smart_store_linux/backend/services/android_resource_monitor.dart'; // Add Android Monitor
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -70,7 +71,9 @@ class VisionLabApp extends StatefulWidget {
 
 class _VisionLabAppState extends State<VisionLabApp>
     with WidgetsBindingObserver, WindowListener {
-  late LinuxResourceMonitor _monitor;
+  // Use dynamic or common interface if available, strictly typed limits swapping.
+  // For now simple object as they don't share a base class in this refactor step.
+  dynamic _monitor;
 
   @override
   void initState() {
@@ -117,7 +120,7 @@ class _VisionLabAppState extends State<VisionLabApp>
       StreamProcessManager.instance.clearAll();
 
       // 2. Stop resource monitor
-      _monitor.stop();
+      _monitor?.stop();
 
       // 3. Shutdown low-level native resources
       NativeInferenceService().shutdown();
@@ -135,7 +138,11 @@ class _VisionLabAppState extends State<VisionLabApp>
         ChangeNotifierProvider(
           create: (context) {
             final provider = AppProvider();
-            _monitor = LinuxResourceMonitor(provider);
+            if (Platform.isAndroid) {
+              _monitor = AndroidResourceMonitor(provider);
+            } else {
+              _monitor = LinuxResourceMonitor(provider);
+            }
             _monitor.start();
             return provider;
           },
@@ -174,7 +181,7 @@ class _VisionLabAppState extends State<VisionLabApp>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _monitor.stop();
+    _monitor?.stop();
     _shutdownNativeResources();
     super.dispose();
   }

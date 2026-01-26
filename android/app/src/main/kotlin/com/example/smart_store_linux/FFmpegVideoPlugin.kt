@@ -21,6 +21,7 @@ import io.flutter.view.TextureRegistry
 class FFmpegVideoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     private lateinit var channel: MethodChannel
     private lateinit var textureRegistry: TextureRegistry
+    private lateinit var applicationContext: android.content.Context
     private val streams = ConcurrentHashMap<Int, FFmpegStream>()
     private var nextId = AtomicInteger(1)
 
@@ -28,6 +29,7 @@ class FFmpegVideoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         channel = MethodChannel(binding.binaryMessenger, "ffmpeg_video")
         channel.setMethodCallHandler(this)
         textureRegistry = binding.textureRegistry
+        applicationContext = binding.applicationContext
         
         // Enable detailed FFmpeg logging
         FFmpegLogCallback.set()
@@ -97,6 +99,104 @@ class FFmpegVideoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     result.success(null)
                 }
             }
+            "getSystemStats" -> {
+                 thread {
+                     try {
+                         // 1. NPU Stats (Rockchip specific)
+                         // Try common paths
+                         var npuLoad = 0.0
+                         val paths = listOf(
+                             "/sys/kernel/debug/rknpu/load",
+                             "/sys/class/devfreq/fdab0000.npu/load"
+                         )
+                         
+                         for (path in paths) {
+                             try {
+                                 val file = java.io.File(path)
+                                 if (file.exists() && file.canRead()) {
+                                     val content = file.readText().trim()
+                                     android.util.Log.i("FFmpegVideoPlugin", "NPU raw ($path): '$content'")
+                                     
+                                     // Robust parsing for multi-core: "NPU load:  Core0: 15%, Core1:  0%, Core2:  0%,"
+                                     // We want the MAX usage across cores to show activity.
+                                     
+                                     // Regex to find all percentages: "15%", "0%"
+                                     // The log shows no space between number and %, e.g. "15%" or " 0%"
+                                     val percentMatches = Regex("(\\d+)%").findAll(content)
+                                     
+                                     var maxLoad = 0.0
+                                     var found = false
+                                     
+                                     for (match in percentMatches) {
+                                         val (valStr) = match.destructured
+                                         val v = valStr.toDoubleOrNull() ?: 0.0
+                                         if (v > maxLoad) {
+                                             maxLoad = v
+                                         }
+                                         found = true
+                                     }
+                                     
+                                     if (found) {
+                                         // Normalize? If > 100, clamp.
+                                         if (maxLoad > 100.0) maxLoad = 100.0
+                                         npuLoad = maxLoad
+                                         break
+                                     }
+                                     
+                                     // Fallback if no % found: look for just numbers?
+                                     // ... existing logic ...
+                                     val matches = Regex("\\d+").findAll(content).map { it.value.toIntOrNull() }.filterNotNull().toList()
+                                     val validPercent = matches.lastOrNull { it <= 100 }
+                                     if (validPercent != null) {
+                                         npuLoad = validPercent.toDouble()
+                                         break
+                                     }
+                                     
+                                     // If we only found numbers > 100, assume it's not a % load (maybe frequency)
+                                     // and keep trying other paths or return 0
+                                 }
+                             } catch(e: Exception) {
+                                 android.util.Log.w("FFmpegVideoPlugin", "Failed to read $path: $e")
+                             }
+                         }
+                         
+                         // 2. RAM Stats
+                         val actManager = applicationContext.getSystemService(android.content.Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+                         val memInfo = android.app.ActivityManager.MemoryInfo()
+                         actManager.getMemoryInfo(memInfo)
+                         val totalRamGb = memInfo.totalMem.toDouble() / (1024 * 1024 * 1024)
+                         val availRamGb = memInfo.availMem.toDouble() / (1024 * 1024 * 1024)
+                         val usedRamGb = totalRamGb - availRamGb
+                         
+                         // 3. CPU Stats (Rough estimate from /proc/stat)
+                         // Getting accurate per-app CPU on Android 8+ is hard restricted.
+                         // But we can try system-wide load if accessible or simulated.
+                         // Simple approach: Read /proc/stat if generic linux kernel accessible
+                         var cpuLoad = 0.0
+                         try {
+                              // Simplified one-shot - reliable delta requires state
+                              // For now, return 0.0 or random fluctuation?
+                              // Let's rely on Dart side for simulated CPU if native fails, 
+                              // or just return 0 if restricted.
+                         } catch(e: Exception) {}
+
+                         val stats = mapOf(
+                             "npu" to npuLoad, // The "GPU" field in Dart will show this
+                             "ram" to usedRamGb,
+                             "ramTotal" to totalRamGb,
+                             "cpu" to 0.0 // Placeholder
+                         )
+                         
+                         android.os.Handler(android.os.Looper.getMainLooper()).post {
+                             result.success(stats)
+                         }
+                     } catch (e: Exception) {
+                         android.os.Handler(android.os.Looper.getMainLooper()).post {
+                             result.error("STATS_ERROR", e.message, null)
+                         }
+                     }
+                 }
+            }
             else -> result.notImplemented()
         }
     }
@@ -119,6 +219,16 @@ class FFmpegStream(
     private var bufferA: ByteArray? = null
     private var bufferB: ByteArray? = null
     private var useBufferA = true
+
+    // Rendering Thread
+    private val renderThread = android.os.HandlerThread("RenderThread-$id")
+    private lateinit var renderHandler: android.os.Handler
+    private var surface: Surface? = null // Reuse Surface
+    
+    init {
+        renderThread.start()
+        renderHandler = android.os.Handler(renderThread.looper)
+    }
     
     fun start() {
         if (isRunning.getAndSet(true)) return
@@ -128,12 +238,11 @@ class FFmpegStream(
             
             val surfaceTexture = textureEntry.surfaceTexture()
             surfaceTexture.setDefaultBufferSize(1280, 720) // High Res
-            // Note: We don't need a Surface object permanently in the loop anymore,
-            // we will create/use it inside showFrame or keep it here?
-            // Keeping it here is safer for the generic cleanup.
-            // Wait, we need the Surface to draw.
-            // Let's create it once.
-            val surface = Surface(surfaceTexture)
+            
+            // Create Surface once for this stream
+            synchronized(this) {
+                surface = Surface(surfaceTexture)
+            }
              
             var grabber: FFmpegFrameGrabber? = null
             
@@ -261,8 +370,17 @@ class FFmpegStream(
             } finally {
                 grabber?.stop()
                 grabber?.release()
-                surface.release()
-                textureEntry.release()
+                
+                synchronized(this) {
+                    surface?.release()
+                    surface = null
+                }
+                
+                renderThread.quitSafely() // Stop render thread
+                
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    textureEntry.release()
+                }
             }
         }
     }
@@ -270,27 +388,27 @@ class FFmpegStream(
     fun showFrame(timestamp: Long) {
         val bitmap = frameBuffer.remove(timestamp) // Get and remove (consume)
         if (bitmap != null) {
-            try {
-                val surfaceTexture = textureEntry.surfaceTexture()
-                // Need a surface. Can we create one on fly or reuse?
-                // Surface(surfaceTexture) is cheap?
-                // Ideally reuse. But we can't pass it easily.
-                // Let's make `surface` a member? Thread safety?
-                // Surface is thread safe.
-                val surface = Surface(surfaceTexture)
-                
-                val rect = android.graphics.Rect(0, 0, 1280, 720)
-                val canvas = surface.lockCanvas(rect)
-                canvas.drawBitmap(bitmap, null, rect, null)
-                surface.unlockCanvasAndPost(canvas)
-                
-                surface.release() // Release scope
-                bitmap.recycle() // Done with it
-            } catch (e: Exception) {
-                android.util.Log.e("FFmpegStream", "Show error: $e")
+            // Offload rendering to background thread to avoid UI jank
+            renderHandler.post {
+                try {
+                    synchronized(this) {
+                        if (surface != null && surface!!.isValid) {
+                            val rect = android.graphics.Rect(0, 0, 1280, 720)
+                            val canvas = surface!!.lockCanvas(rect)
+                            if (canvas != null) {
+                                canvas.drawBitmap(bitmap, null, rect, null)
+                                surface!!.unlockCanvasAndPost(canvas)
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("FFmpegStream", "Render error: $e")
+                } finally {
+                    bitmap.recycle() // Always recycle
+                }
             }
         } else {
-             android.util.Log.w("FFmpegStream", "Frame $timestamp not found in buffer")
+             // android.util.Log.w("FFmpegStream", "Frame $timestamp not found in buffer")
         }
     }
 
@@ -306,3 +424,4 @@ class FFmpegStream(
         isRunning.set(false)
     }
 }
+
