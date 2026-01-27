@@ -219,6 +219,10 @@ class FFmpegStream(
     private var bufferA: ByteArray? = null
     private var bufferB: ByteArray? = null
     private var useBufferA = true
+    
+    // Auto-Play Mode (Display immediately until first showFrame call)
+    // This prevents black screen during model loading (2-3s delay)
+    private val autoDisplay = AtomicBoolean(true)
 
     // Rendering Thread
     private val renderThread = android.os.HandlerThread("RenderThread-$id")
@@ -254,6 +258,13 @@ class FFmpegStream(
                     g.setOption("rtsp_transport", "tcp")
                     g.setOption("stimeout", "5000000")
                 }
+                
+                // Low Latency Tuning (Aggressive startup)
+                g.setOption("analyzeduration", "200000") // Analyze only 200ms
+                g.setOption("probesize", "1024576")      // 1MB probe limit
+                g.setOption("fflags", "nobuffer")        // Reduce input buffering
+                g.setOption("flags", "low_delay")        // Low delay mode
+                
                 g.setOption("threads", "1")
                 g.setImageWidth(1280)
                 g.setImageHeight(720)
@@ -296,7 +307,14 @@ class FFmpegStream(
                     // 1. Buffer Bitmap for Display (Render-on-Demand)
                     val rawBitmap = converter.convert(frame)
                     if (rawBitmap != null) {
-                        // Create a managed copy for the buffer
+                        // 1a. Auto-Display (Warmup Phase)
+                        if (autoDisplay.get()) {
+                             // Create a dedicated copy for rendering to avoid threading issues
+                             val displayCopy = rawBitmap.copy(Bitmap.Config.ARGB_8888, false)
+                             postRender(displayCopy)
+                        }
+
+                        // 1b. Buffer Bitmap for Display (Render-on-Demand)
                         val storedBitmap = rawBitmap.copy(Bitmap.Config.ARGB_8888, false)
                         frameBuffer[timestamp] = storedBitmap
                         
@@ -386,29 +404,36 @@ class FFmpegStream(
     }
     
     fun showFrame(timestamp: Long) {
+        // Switch to synchronized mode on first command
+        autoDisplay.set(false)
+        
         val bitmap = frameBuffer.remove(timestamp) // Get and remove (consume)
         if (bitmap != null) {
-            // Offload rendering to background thread to avoid UI jank
-            renderHandler.post {
-                try {
-                    synchronized(this) {
-                        if (surface != null && surface!!.isValid) {
-                            val rect = android.graphics.Rect(0, 0, 1280, 720)
-                            val canvas = surface!!.lockCanvas(rect)
-                            if (canvas != null) {
-                                canvas.drawBitmap(bitmap, null, rect, null)
-                                surface!!.unlockCanvasAndPost(canvas)
-                            }
-                        }
-                    }
-                } catch (e: Exception) {
-                    android.util.Log.e("FFmpegStream", "Render error: $e")
-                } finally {
-                    bitmap.recycle() // Always recycle
-                }
-            }
+            postRender(bitmap)
         } else {
              // android.util.Log.w("FFmpegStream", "Frame $timestamp not found in buffer")
+        }
+    }
+
+    private fun postRender(bitmap: Bitmap) {
+        // Offload rendering to background thread to avoid UI jank
+        renderHandler.post {
+            try {
+                synchronized(this) {
+                    if (surface != null && surface!!.isValid) {
+                        val rect = android.graphics.Rect(0, 0, 1280, 720)
+                        val canvas = surface!!.lockCanvas(rect)
+                        if (canvas != null) {
+                            canvas.drawBitmap(bitmap, null, rect, null)
+                            surface!!.unlockCanvasAndPost(canvas)
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("FFmpegStream", "Render error: $e")
+            } finally {
+                bitmap.recycle() // Always recycle
+            }
         }
     }
 
