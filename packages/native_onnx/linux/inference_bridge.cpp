@@ -152,8 +152,8 @@ int InitONNX() {
     
     try {
         if (!g_env) {
-            // Enable VERBOSE logging to see node assignments (CPU vs CUDA)
-            g_env = std::make_unique<Ort::Env>(ORT_LOGGING_LEVEL_VERBOSE, "NativeONNX");
+            // Enable WARNING logging to suppress GraphTransformer info logs
+            g_env = std::make_unique<Ort::Env>(ORT_LOGGING_LEVEL_WARNING, "NativeONNX");
             g_allocator = std::make_unique<Ort::AllocatorWithDefaultOptions>();
             
             // NOTE: atexit handlers don't work well with Flutter/GTK
@@ -210,6 +210,7 @@ int64_t CreateSession(const char* model_path) {
     try {
         Ort::SessionOptions session_options;
         session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
+        session_options.SetLogSeverityLevel(3); // 3 = ORT_LOGGING_LEVEL_ERROR
 
         // GPU Logic  
         bool gpu_success = false;

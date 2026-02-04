@@ -1,21 +1,29 @@
 import 'dart:async';
 import 'dart:isolate';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:smart_store_linux/ai/inference/service/inference_service.dart';
 import 'package:smart_store_linux/core/models/frames.dart';
 import 'package:smart_store_linux/plugins/base/plugin_base.dart';
 import 'package:smart_store_linux/plugins/impl/people_counting_plugin.dart';
+import 'package:smart_store_linux/plugins/impl/kitchen_supervision_plugin.dart';
 
 /// Top-level entry point for Plugin Isolates
-void pluginIsolateEntry(SendPort hostPort) {
-  // Hardcoded for now as per requirements
-  final plugin = PeopleCountingPlugin();
+void pluginIsolateEntry(Map<String, dynamic> args) {
+  final sendPort = args['sendPort'] as SendPort;
+  final pluginType = args['pluginType'] as String?;
+
+  SmartStorePlugin plugin;
+  if (pluginType == 'kitchen_supervision') {
+    plugin = KitchenSupervisionPlugin();
+  } else {
+    // Default
+    plugin = PeopleCountingPlugin();
+  }
 
   final receivePort = ReceivePort();
-  hostPort.send(receivePort.sendPort);
+  sendPort.send(receivePort.sendPort);
 
   receivePort.listen((message) {
     if (message is Map) {
@@ -23,7 +31,7 @@ void pluginIsolateEntry(SendPort hostPort) {
         // stdout.writeln("PluginIsolate: Init received");
         final config = message['config'] as Map<String, dynamic>;
         final streamId = message['streamId'] as String;
-        plugin.init(hostPort, streamId, config);
+        plugin.init(sendPort, streamId, config);
       } else if (message['type'] == 'frame') {
         // Frame received
         final transferable = message['frame'] as TransferableTypedData;
@@ -80,10 +88,10 @@ class PluginManager {
     _hostReceivePort = ReceivePort();
 
     try {
-      _isolate = await Isolate.spawn(
-        pluginIsolateEntry,
-        _hostReceivePort!.sendPort,
-      );
+      _isolate = await Isolate.spawn(pluginIsolateEntry, {
+        'sendPort': _hostReceivePort!.sendPort,
+        'pluginType': config['pluginType'],
+      });
 
       final completer = Completer<SendPort>();
       _hostReceivePort!.listen((message) {

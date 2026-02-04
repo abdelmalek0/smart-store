@@ -13,7 +13,7 @@ class PeopleCountingPlugin extends SmartStorePlugin {
   final List<int> _recentCounts = [];
   static const int MAX_HISTORY = 5;
 
-  String _modelPath = 'assets/models/yolov5n.rknn';
+  String _modelPath = '';
 
   @override
   Future<void> onInit(Map<String, dynamic> config) async {
@@ -29,6 +29,9 @@ class PeopleCountingPlugin extends SmartStorePlugin {
   Future<void> processFrame(RawFrame frame) async {
     // Run inference on every frame for smooth visualization
     // TODO: optimization - skip inference if busy, but always pass frame?
+    print("###########################################");
+    print("People counting model path: $_modelPath");
+    print("###########################################");
     requestInference(frame, _modelPath);
   }
 

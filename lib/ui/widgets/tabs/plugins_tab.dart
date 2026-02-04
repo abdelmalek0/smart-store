@@ -23,10 +23,10 @@ class _PluginsTabState extends State<PluginsTab> {
       'isActive': true,
     },
     {
-      'id': 'coming_soon',
-      'name': 'Heatmap (Coming Soon)',
-      'description': 'Visualizes dwell time and movement.',
-      'isActive': false,
+      'id': 'kitchen_supervision',
+      'name': 'Kitchen Supervision',
+      'description': 'Detects bare hands (no gloves) for 5 seconds.',
+      'isActive': true,
     },
   ];
 
@@ -150,7 +150,9 @@ class _PluginsTabState extends State<PluginsTab> {
             ],
           ),
 
-          if (isEnabled && pluginId == 'people_counting') ...[
+          if (isEnabled &&
+              (pluginId == 'people_counting' ||
+                  pluginId == 'kitchen_supervision')) ...[
             const SizedBox(height: 20),
             Container(
               padding: const EdgeInsets.all(16),
@@ -224,12 +226,20 @@ class _PluginsTabState extends State<PluginsTab> {
                               setState(() {}); // Update UI
 
                               // 1. Persist Global Defaults
+                              final Map<String, dynamic> newConfig = {
+                                'modelPath': value,
+                              };
+
+                              if (pluginId == 'people_counting') {
+                                newConfig['personClassId'] = 0;
+                                newConfig['confidenceThreshold'] = 0.5;
+                              } else if (pluginId == 'kitchen_supervision') {
+                                newConfig['handClassId'] = 3;
+                                newConfig['confidenceThreshold'] = 0.5;
+                              }
+
                               await ConfigService.instance
-                                  .setGlobalPluginConfig(pluginId, {
-                                    'modelPath': value,
-                                    'personClassId': 0,
-                                    'confidenceThreshold': 0.5,
-                                  });
+                                  .setGlobalPluginConfig(pluginId, newConfig);
 
                               // 2. Notify Parent/System
                               widget.onModelChanged(name, value);

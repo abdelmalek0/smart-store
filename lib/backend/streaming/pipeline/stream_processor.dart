@@ -98,14 +98,24 @@ class StreamProcessor {
       if (config == null) {
         config = {
           'pluginId': pluginId,
-          'personClassId': 0,
-          'confidenceThreshold': 0.5,
           'modelPath': 'assets/models/yolov5n.rknn',
         };
+
+        if (pluginId == 'kitchen_supervision') {
+          config['handClassId'] = 3;
+          config['confidenceThreshold'] = 0.5;
+        } else {
+          // Default to people counting
+          config['personClassId'] = 0;
+          config['confidenceThreshold'] = 0.5;
+        }
       } else {
         // Ensure pluginId is set in config
         config['pluginId'] = pluginId;
       }
+
+      // Ensure pluginType is set for PluginManager
+      config['pluginType'] = pluginId;
 
       final modelPath = config['modelPath'] ?? 'assets/models/yolov5n.rknn';
 

@@ -50,3 +50,6 @@ app.*.map.json
 *.bin
 .ninja_*
     
+
+assets/*.rknn
+assets/*.onnx

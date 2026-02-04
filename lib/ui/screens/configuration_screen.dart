@@ -16,7 +16,7 @@ class _ConfigurationScreenState extends State<ConfigurationScreen> {
   // Hardcoded available plugins (should match PluginsTab ideally, or come from a registry)
   final List<Map<String, String>> _availablePlugins = [
     {'id': 'people_counting', 'name': 'People Counting'},
-    {'id': 'coming_soon', 'name': 'Heatmap (Coming Soon)'},
+    {'id': 'kitchen_supervision', 'name': 'Kitchen Supervision'},
   ];
 
   @override

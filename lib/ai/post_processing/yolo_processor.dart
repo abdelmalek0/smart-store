@@ -66,14 +66,25 @@ class YoloPostProcessor {
     double confidenceThreshold = Constants.confidenceThreshold,
     double nmsThreshold = Constants.nmsIouThreshold,
   }) {
-    if (data.length != Constants.yolov8OutputSize) {
+    final int numAnchors = Constants.yolov8NumAnchors; // 8400
+    // Dynamic calculation: data.length = (4 + numClasses) * numAnchors
+    // (4 + numClasses) = data.length / numAnchors
+    // numClasses = (data.length / numAnchors) - 4
+    if (data.length % numAnchors != 0) {
       throw ArgumentError(
-        'Invalid YOLOv8 output size: ${data.length}, expected ${Constants.yolov8OutputSize}',
+        'Invalid YOLOv8 output size: ${data.length} is not divisible by $numAnchors anchors.',
       );
     }
 
-    final int numAnchors = Constants.yolov8NumAnchors;
-    final int numClasses = Constants.numClasses;
+    final int numClasses = (data.length ~/ numAnchors) - 4;
+
+    // Safety check
+    if (numClasses <= 0) {
+      throw ArgumentError(
+        'Invalid YOLOv8 output size: ${data.length} implies $numClasses classes (must be > 0).',
+      );
+    }
+
     final int inputSize = Constants.modelInputSize;
 
     final List<Detection> candidates = [];

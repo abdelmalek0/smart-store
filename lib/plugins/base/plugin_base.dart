@@ -10,6 +10,8 @@ abstract class SmartStorePlugin {
   String? _streamId;
   String? _pluginId;
 
+  String get streamId => _streamId ?? 'unknown';
+
   // --- Internal State ---
   int _requestIdCounter = 0;
   final Map<int, RawFrame> _pendingFrames = {};
