@@ -234,7 +234,7 @@ class _PluginsTabState extends State<PluginsTab> {
                                 newConfig['personClassId'] = 0;
                                 newConfig['confidenceThreshold'] = 0.5;
                               } else if (pluginId == 'kitchen_supervision') {
-                                newConfig['handClassId'] = 3;
+                                newConfig['handClassId'] = 4; // 'no-gloves'
                                 newConfig['confidenceThreshold'] = 0.5;
                               }
 

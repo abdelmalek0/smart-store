@@ -102,7 +102,7 @@ class StreamProcessor {
         };
 
         if (pluginId == 'kitchen_supervision') {
-          config['handClassId'] = 3;
+          config['handClassId'] = 4; // 'no-gloves' is index 4
           config['confidenceThreshold'] = 0.5;
         } else {
           // Default to people counting
@@ -332,9 +332,10 @@ class StreamProcessor {
         timer.cancel();
         return;
       }
-      final captureFps = (_captureCount / 2).toStringAsFixed(1);
-      final inferenceFps = (_inferenceFrameCounter / 2).toStringAsFixed(1);
-      final displayFps = (_displayCount / 2).toStringAsFixed(1);
+      // FPS calculation logic temporarily disabled or removed if unused
+      // final captureFps = (_captureCount / 2).toStringAsFixed(1);
+      // final inferenceFps = (_inferenceFrameCounter / 2).toStringAsFixed(1);
+      // final displayFps = (_displayCount / 2).toStringAsFixed(1);
 
       // debugPrint(
       //   "📊 Stats [${stream.id}]: "

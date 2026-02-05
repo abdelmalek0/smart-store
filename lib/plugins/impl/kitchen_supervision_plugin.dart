@@ -3,21 +3,27 @@ import 'package:smart_store_linux/core/models/frames.dart';
 import 'package:smart_store_linux/plugins/base/plugin_base.dart';
 
 /// Kitchen Supervision Plugin
-/// Detects 'Hand' class (index 3) and emits an event if detected for 5 seconds consecutively.
+/// Detects 'no-gloves' class (index 4) for violations and 'gloves' class (index 0) for display.
+/// Emits an event if 'no-gloves' is detected for 5 seconds consecutively.
 class KitchenSupervisionPlugin extends SmartStorePlugin {
   DateTime? _handDetectionStartTime;
-  int _handClassId = 3; // 'Hand' is index 3
+  int _handClassId = 4; // 'no-gloves' is index 4
   double _confidenceThreshold = 0.5;
   String _modelPath = ''; // Default, can be overridden in config
   bool _eventFiredForThisSession = false;
 
   @override
   Future<void> onInit(Map<String, dynamic> config) async {
-    _handClassId = config['handClassId'] ?? 3;
+    _handClassId = config['handClassId'] ?? 4;
     _confidenceThreshold = config['confidenceThreshold'] ?? 0.5;
     if (config.containsKey('modelPath')) {
       _modelPath = config['modelPath'];
     }
+
+    // DEBUG: Log initialization
+    print(
+      "KitchenSupervisionPlugin [$streamId]: Initialized. Model Path: $_modelPath, Hand Class ID: $_handClassId",
+    );
   }
 
   @override
@@ -41,16 +47,21 @@ class KitchenSupervisionPlugin extends SmartStorePlugin {
         final classId = (det[5] as num).toInt();
         final score = (det[4] as num).toDouble();
 
-        // Classes: ['Hat', 'Mask', 'Glove', 'Hand']
-        // We are interested in 'Hand' (index 3) for events.
-        // We are interested in 'Hand' (index 3) and 'Glove' (index 2) for display.
+        // Classes:
+        // 0: gloves
+        // 1: hat
+        // 2: head
+        // 3: mask
+        // 4: no-gloves (Hand) - Violation
+        // 5: no-mask
 
         if (score >= _confidenceThreshold) {
           if (classId == _handClassId) {
+            // 4: no-gloves
             handDetected = true;
             handDetections.add(det);
-          } else if (classId == 2) {
-            // Glove
+          } else if (classId == 0) {
+            // 0: gloves (Display only)
             handDetections.add(det);
           }
         }
