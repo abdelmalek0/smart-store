@@ -194,3 +194,57 @@ int Session_GetOutput(int64_t session_id, int index, float** out_data, int64_t**
          return 3;
     }
 }
+
+// Static storage for labels string (to keep memory valid after function returns)
+static std::map<int64_t, std::string> g_labels_cache;
+
+int Session_GetLabels(int64_t session_id, const char** out_labels, int* out_length) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    auto it = g_contexts.find(session_id);
+    if (it == g_contexts.end()) {
+        *out_labels = nullptr;
+        *out_length = 0;
+        return 1;
+    }
+    auto& ctx = it->second;
+
+    try {
+        Ort::AllocatorWithDefaultOptions allocator;
+        auto metadata = ctx->session->GetModelMetadata();
+        
+        // Try common keys used by YOLO models for class labels
+        // YOLO/Ultralytics typically uses "names" as a Python dict string like: {0: 'person', 1: 'bicycle', ...}
+        const char* keys_to_try[] = {"names", "labels", "class_names", "classes"};
+        std::string labels_str;
+        
+        for (const char* key : keys_to_try) {
+            auto value_ptr = metadata.LookupCustomMetadataMapAllocated(key, allocator);
+            if (value_ptr) {
+                labels_str = std::string(value_ptr.get());
+                std::cout << "[Native] Found metadata key '" << key << "': " << labels_str.substr(0, 100) << "..." << std::endl;
+                break;
+            }
+        }
+        
+        if (labels_str.empty()) {
+            // No labels found in metadata
+            std::cout << "[Native] No label metadata found in model" << std::endl;
+            *out_labels = nullptr;
+            *out_length = 0;
+            return 0; // Not an error, just no labels
+        }
+        
+        // Store in cache for this session
+        g_labels_cache[session_id] = labels_str;
+        *out_labels = g_labels_cache[session_id].c_str();
+        *out_length = (int)g_labels_cache[session_id].length();
+        
+        return 0;
+    } catch (const std::exception& e) {
+        std::cerr << "[Native] GetLabels failed: " << e.what() << std::endl;
+        *out_labels = nullptr;
+        *out_length = 0;
+        return 2;
+    }
+}
+

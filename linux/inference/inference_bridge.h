@@ -39,6 +39,12 @@ int Session_Run(int64_t session_id, const char** output_names, int num_outputs);
 // Returns 0 on success
 int Session_GetOutput(int64_t session_id, int index, float** out_data, int64_t** out_dims, int* out_rank, int64_t* out_count);
 
+// Get class labels from ONNX model metadata
+// out_labels: pointer to C string containing the labels (typically a Python dict format)
+// out_length: length of the labels string
+// Returns 0 on success, labels may be empty if model has no label metadata
+int Session_GetLabels(int64_t session_id, const char** out_labels, int* out_length);
+
 #ifdef __cplusplus
 }
 #endif

@@ -26,6 +26,8 @@ class StreamProcessor {
   // modelPath removed from member fields as it is now dynamic in Plugin Config
   int _nativeVideoId = 0;
   int? _textureId;
+  int _frameWidth = 0;
+  int _frameHeight = 0;
   bool _isActive = true;
 
   // Freeze mode - stop inference but keep displaying raw frames
@@ -58,6 +60,12 @@ class StreamProcessor {
   bool get isInitialized => _nativeVideoId > 0;
   int get nativeVideoId => _nativeVideoId; // Expose for texture linking
   int? get textureId => _textureId;
+  int get frameWidth => _frameWidth;
+  int get frameHeight => _frameHeight;
+
+  // Model labels extracted from ONNX metadata (received from capture isolate)
+  Map<int, String> _modelLabels = {};
+  Map<int, String> get modelLabels => _modelLabels;
   bool get isFrozen => _isFrozen;
 
   // Isolate for frame capture
@@ -273,6 +281,10 @@ class StreamProcessor {
                 }
                 // Do not add to display queue here; wait for plugin to emit it back
               } else {
+                if (processed.width > 0) {
+                  _frameWidth = processed.width;
+                  _frameHeight = processed.height;
+                }
                 _displayQueue.add(processed);
                 if (!_isFrozen) {
                   _inferenceFrameCounter++;
@@ -280,6 +292,13 @@ class StreamProcessor {
               }
               // _captureCount++; // Fix: Also count processed_frame as captured
               // _inferenceFrameCounter++; // Moved to else block or plugin listener
+            } else if (msgType == 'labels') {
+              // Labels from ONNX model metadata sent by capture isolate
+              final labelsMap = message[1] as Map<int, String>;
+              _modelLabels = labelsMap;
+              debugPrint(
+                "📋 StreamProcessor: Received ${labelsMap.length} model labels",
+              );
             } else {
               debugPrint("Main: Unknown list message type: '$msgType'");
             }
@@ -287,7 +306,7 @@ class StreamProcessor {
             _nativeVideoId = message['videoId'] as int;
             _textureId = message['textureId'] as int;
             debugPrint(
-              "Stream Processor: Initialized with Texture ID $_textureId",
+              "Stream Processor: Received Init Message. VideoID: $_nativeVideoId, TextureID: $_textureId",
             );
           } else if (message is int) {
             _nativeVideoId = message;
@@ -399,6 +418,11 @@ class StreamProcessor {
         if (frameToDisplay != null && !_frameStreamController.isClosed) {
           _frameStreamController.add(frameToDisplay);
           _displayCount++; // Track display count
+          if (_displayCount % 30 == 0) {
+            debugPrint(
+              "SPM: Display loop emitting frame #${_displayCount}. Q: ${_displayQueue.length}",
+            );
+          }
         }
       } catch (e) {
         debugPrint("SPM: Error in display loop: $e");

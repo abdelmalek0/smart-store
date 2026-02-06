@@ -83,6 +83,13 @@ ONNX_BRIDGE_EXPORT int Video_GetFrameAndInfer(
     float* out_inference_time
 );
 
+// Get class labels from ONNX model metadata
+// out_labels: pointer to C string containing the labels (typically a Python dict format)
+// out_length: length of the labels string
+// Returns 0 on success, labels may be empty if model has no label metadata
+ONNX_BRIDGE_EXPORT int Session_GetLabels(int64_t session_id, const char** out_labels, int* out_length);
+
 #ifdef __cplusplus
 }
 #endif
+

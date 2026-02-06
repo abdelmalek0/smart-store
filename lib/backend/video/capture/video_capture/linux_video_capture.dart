@@ -68,6 +68,16 @@ class LinuxVideoCapture implements VideoCapture {
 
       if (_sessionId != 0) {
         debugPrint("✓ Linux: Optimized session created (ID: $_sessionId)");
+
+        // Extract and register model labels from ONNX metadata
+        final labels = _native.getLabels(_sessionId!);
+        if (labels.isNotEmpty) {
+          debugPrint(
+            "✓ Linux: Found ${labels.length} labels in model metadata",
+          );
+          // Import and register labels
+          _registerLabels(modelPath, labels);
+        }
       } else {
         debugPrint("⚠ Linux: Session creation returned 0");
         _sessionId = null;
@@ -77,6 +87,20 @@ class LinuxVideoCapture implements VideoCapture {
       _sessionId = null;
     }
   }
+
+  /// Register labels with the global registry for UI access
+  void _registerLabels(String modelPath, Map<int, String> labels) {
+    // Store labels in a static map for UI access
+    // We use a simple approach - store in the class and expose via getter
+    _modelLabels = labels;
+    debugPrint("✓ Linux: Registered labels for $modelPath");
+  }
+
+  /// Labels from the current model
+  static Map<int, String> _modelLabels = {};
+
+  /// Get labels for the currently loaded model
+  static Map<int, String> get modelLabels => _modelLabels;
 
   @override
   Future<VideoCaptureResult> open(String url) async {

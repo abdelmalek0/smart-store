@@ -36,6 +36,7 @@ class NativeInferenceService {
   late VideoGetFrame _videoGetFrame;
   late VideoGetFrameAndInfer _videoGetFrameAndInfer;
   late PreprocessImage _preprocessImage;
+  late SessionGetLabels _getLabels;
 
   bool _isInitialized = false;
   Future<void>? _initFuture;
@@ -114,6 +115,10 @@ class NativeInferenceService {
         _videoGetFrameAndInfer = _lib!
             .lookupFunction<VideoGetFrameAndInferFunc, VideoGetFrameAndInfer>(
               'Video_GetFrameAndInfer',
+            );
+        _getLabels = _lib!
+            .lookupFunction<SessionGetLabelsFunc, SessionGetLabels>(
+              'Session_GetLabels',
             );
 
         _initONNX();
@@ -345,5 +350,71 @@ class NativeInferenceService {
         calloc.free(countRef);
       }
     }
+  }
+
+  /// Cache for parsed labels per session
+  final Map<int, Map<int, String>> _labelsCache = {};
+
+  /// Get class labels from ONNX model metadata
+  /// Returns a map of classId -> class name
+  /// Returns empty map if no labels found in model metadata
+  Map<int, String> getLabels(int sessionId) {
+    if (!_isInitialized) return {};
+
+    // Check cache first
+    if (_labelsCache.containsKey(sessionId)) {
+      return _labelsCache[sessionId]!;
+    }
+
+    final labelsPtrRef = calloc<Pointer<Utf8>>();
+    final lengthRef = calloc<Int32>();
+
+    try {
+      final result = _getLabels(sessionId, labelsPtrRef, lengthRef);
+      if (result != 0 || labelsPtrRef.value == nullptr) {
+        _labelsCache[sessionId] = {};
+        return {};
+      }
+
+      final labelsStr = labelsPtrRef.value.toDartString();
+      if (labelsStr.isEmpty) {
+        _labelsCache[sessionId] = {};
+        return {};
+      }
+
+      // Parse YOLO-style labels format: {0: 'person', 1: 'bicycle', ...}
+      final labels = _parseYoloLabels(labelsStr);
+      _labelsCache[sessionId] = labels;
+      return labels;
+    } finally {
+      calloc.free(labelsPtrRef);
+      calloc.free(lengthRef);
+    }
+  }
+
+  /// Parse YOLO-style label format from ONNX metadata
+  /// Handles format like: {0: 'person', 1: 'bicycle', 2: 'car', ...}
+  Map<int, String> _parseYoloLabels(String labelsStr) {
+    final Map<int, String> labels = {};
+
+    // Remove outer braces if present
+    var content = labelsStr.trim();
+    if (content.startsWith('{')) content = content.substring(1);
+    if (content.endsWith('}'))
+      content = content.substring(0, content.length - 1);
+
+    // Parse each key-value pair
+    // Format: 0: 'person', 1: 'bicycle', ...
+    final regex = RegExp(r'''(\d+)\s*:\s*['"]([^'"]+)['"]''');
+    for (final match in regex.allMatches(content)) {
+      final classId = int.tryParse(match.group(1)!);
+      final className = match.group(2);
+      if (classId != null && className != null) {
+        labels[classId] = className;
+      }
+    }
+
+    debugPrint('[Native] Parsed ${labels.length} labels from model metadata');
+    return labels;
   }
 }

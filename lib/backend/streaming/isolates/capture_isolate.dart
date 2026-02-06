@@ -40,6 +40,13 @@ Future<void> _captureLoopAsync(IsolateInitParams params) async {
       params.modelPath != null &&
       capture is LinuxVideoCapture) {
     await capture.enableOptimizedInference(params.modelPath!);
+
+    // Send labels to parent isolate for UI access
+    final labels = LinuxVideoCapture.modelLabels;
+    if (labels.isNotEmpty) {
+      params.sendPort.send(['labels', labels]);
+      debugPrint("📋 Sent ${labels.length} labels to main isolate");
+    }
   }
 
   VideoCaptureResult? videoStream;

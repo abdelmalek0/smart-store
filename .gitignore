@@ -45,11 +45,9 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
-# Ninja build artifacts
-*.o
-*.bin
-.ninja_*
-    
+# Android native (CMake/NDK) build outputs
+**/.cxx/
+
 
 assets/*.rknn
 assets/*.onnx

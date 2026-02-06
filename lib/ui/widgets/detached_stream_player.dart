@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -36,6 +37,9 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
   int _currentWidth = 1920; // Default to full HD
   int _currentHeight = 1080;
 
+  // Model labels from ONNX metadata (received from StreamProcessor)
+  Map<int, String> _modelLabels = {};
+
   // Stats
   int _decodeMs = 0;
   int _inferenceMs = 0;
@@ -63,84 +67,130 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
     if (_frameSubscription != null) return; // Already listening
 
     try {
-      // Connect to Headless Processor
       final externalProcessor = StreamProcessManager.instance.getProcessor(
         widget.streamId,
       );
 
-      if (externalProcessor != null && externalProcessor.isInitialized) {
+      // Stream ID should be valid if we are here
+      if (externalProcessor != null) {
         debugPrint("Attached to processor for ${widget.streamId}");
 
-        // 1. Check if Processor ALREADY has a native texture (Android Path)
-        if (externalProcessor.nativeVideoId > 0 &&
-            externalProcessor.textureId != null) {
+        // 1. Initial State Sync
+        // Apply existing state if processor is already running
+        if (mounted) {
           setState(() {
-            _textureId = externalProcessor.textureId;
-            // _textureManagerId not needed for simple Android texture view
-            debugPrint("[TEXTURE] Using Native Android Texture: $_textureId");
+            if (externalProcessor.frameWidth > 0) {
+              _currentWidth = externalProcessor.frameWidth;
+            }
+            if (externalProcessor.frameHeight > 0) {
+              _currentHeight = externalProcessor.frameHeight;
+            }
+            if (externalProcessor.modelLabels.isNotEmpty) {
+              _modelLabels = externalProcessor.modelLabels;
+            }
+            // For Android, check if texture ID is already available
+            if (Platform.isAndroid && externalProcessor.textureId != null) {
+              _textureId = externalProcessor.textureId;
+            }
           });
         }
-        // 2. If not, try creating a Linux Texture (Zero-Copy Linux Path)
-        else {
+
+        // 2. Linux Texture Creation (Platform Specific)
+        // Android uses native texture from plugin. Linux needs explicit creation.
+        bool isLinuxTextureConnected = false;
+
+        if (Platform.isLinux) {
           try {
+            // Create texture surface
             final textureService = TextureService();
             final textureResult = await textureService.createVideoTexture(
               _currentWidth,
               _currentHeight,
             );
 
-            if (textureResult != null) {
+            if (textureResult != null && mounted) {
               setState(() {
                 _textureId = textureResult['textureId'];
                 _textureManagerId = textureResult['textureManagerId'];
               });
-              debugPrint(
-                "[TEXTURE] Created Linux texture $_textureId (manager: $_textureManagerId)",
-              );
-
-              // Connect stream to texture for automatic frame updates
-              final videoId = externalProcessor.nativeVideoId;
-              if (videoId > 0) {
-                await textureService.connectStreamToTexture(
-                  videoId,
-                  _textureManagerId!,
-                );
-                debugPrint("[TEXTURE] Connected video $videoId to texture");
-              }
+              // debugPrint("[TEXTURE] Created Linux Texture $_textureId");
             }
           } catch (e) {
-            debugPrint(
-              "[TEXTURE] Linux Texture creation failed (Expected on Android): $e",
-            );
+            debugPrint("[TEXTURE] Linux creation error: $e");
           }
         }
 
-        // Listen to processed frames (for Detections & FPS stats)
-        _frameSubscription = externalProcessor.frameStream.listen((frame) {
+        // 3. Subscribe to Stream
+        // Crucial: We subscribe even if processor is not fully initialized.
+        // This ensures we receive frames as soon as they start flowing.
+        _frameSubscription = externalProcessor.frameStream.listen((
+          frame,
+        ) async {
           if (!mounted || !_isActive) return;
 
-          // TEXTURE MODE: Synchronized Display (Render-on-Demand)
-          if (_textureId != null) {
-            // If we are using Android Native Texture, we MUST call showFrame manually
-            // Linux typically auto-updates via texture manager connection, but
-            // Android one relies on explicit 'showFrame' call in StreamProcessor.
-            if (externalProcessor.textureId != null) {
-              // Android check
-              externalProcessor.showFrame(frame.decodeStartMs);
-            }
+          bool needsSetState = false;
 
-            // 2. Update UI Overlay immediately
+          // A. Late State Sync / Connection Logic
+
+          // Android: Pick up texture ID if it arrives late
+          if (Platform.isAndroid &&
+              _textureId == null &&
+              externalProcessor.textureId != null) {
+            _textureId = externalProcessor.textureId;
+            needsSetState = true;
+          }
+
+          // Linux: Connect stream to texture when Video ID becomes available
+          if (Platform.isLinux &&
+              !isLinuxTextureConnected &&
+              _textureManagerId != null &&
+              externalProcessor.nativeVideoId > 0) {
+            try {
+              await TextureService().connectStreamToTexture(
+                externalProcessor.nativeVideoId,
+                _textureManagerId!,
+              );
+              isLinuxTextureConnected = true;
+              debugPrint("[TEXTURE] Connected Linux stream to texture");
+            } catch (e) {
+              // Ignore temporary connection errors
+            }
+          }
+
+          // Labels Sync
+          if (externalProcessor.modelLabels.isNotEmpty &&
+              _modelLabels.isEmpty) {
+            _modelLabels = externalProcessor.modelLabels;
+            needsSetState = true;
+          }
+
+          if (needsSetState) {
+            setState(() {});
+          }
+
+          // B. Android Render Trigger
+          // Android requires explicit 'showFrame' to update the SurfaceTexture
+          if (Platform.isAndroid && _textureId != null) {
+            externalProcessor.showFrame(frame.decodeStartMs);
+          }
+
+          // C. Texture Update / Repaint
+          if (Platform.isLinux &&
+              _textureManagerId != null &&
+              _textureId != null) {
+            TextureService().updateTexture(_textureId!);
+          }
+
+          // D. Update UI Data (FPS, Detections) - Optimized Path
+          // Use Optimized Path if we are in Texture Mode (ignoring redundant bytes)
+          // OR if we have no bytes (inference only)
+          if (_textureId != null || frame.imageBytes.isEmpty) {
             setState(() {
               _currentDetections = frame.detections;
               _currentWidth = frame.width;
               _currentHeight = frame.height;
 
-              final timing = frame.timingBreakdown;
-              _decodeMs = timing['decode'] ?? 0;
-              _inferenceMs = timing['inference'] ?? 0;
-              _postprocessMs = timing['postprocess'] ?? 0;
-
-              // FPS Calculation (Based on display updates)
+              // FPS Calc
               final now = DateTime.now().millisecondsSinceEpoch;
               _frameTimestamps.add(now);
               if (_frameTimestamps.length > FPS_WINDOW_SIZE) {
@@ -153,54 +203,10 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
                 }
               }
             });
-
-            // 3. Trigger texture repaint (Linux needs this often, Android usually auto-repaints on draw)
-            // But Android Texture widget might need a notify?
-            // On Android, SurfaceTexture.updateTexImage() is called by Flutter engine when onFrameAvailable.
-            // Our native plugin calls unlockCanvasAndPost which triggers onFrameAvailable.
-            // So we might NOT need to do anything here for Android.
-            if (_textureManagerId != null) {
-              TextureService().updateTexture(_textureId!);
-            }
             return;
           }
 
-          // LEGACY MODE: Image Decoding (Slow Path)
-          // Skip if no video data (optimized detections-only path)
-          if (frame.imageBytes.isEmpty) {
-            setState(() {
-              _currentDetections = frame.detections;
-              _currentWidth = frame.width;
-              _currentHeight = frame.height;
-
-              final timing = frame.timingBreakdown;
-              _decodeMs = timing['decode'] ?? 0;
-              _inferenceMs = timing['inference'] ?? 0;
-              _postprocessMs = timing['postprocess'] ?? 0;
-
-              // FPS calculation
-              final now = DateTime.now().millisecondsSinceEpoch;
-              _frameTimestamps.add(now);
-              if (_frameTimestamps.length > FPS_WINDOW_SIZE) {
-                _frameTimestamps.removeAt(0);
-              }
-              if (_frameTimestamps.length >= 2) {
-                final duration = _frameTimestamps.last - _frameTimestamps.first;
-                if (duration > 0) {
-                  _fps = ((_frameTimestamps.length - 1) * 1000) / duration;
-                }
-              }
-            });
-            return;
-          }
-
-          // Frame rate limiting: If we're already decoding, save this as pending
-          // This prevents the UI thread from being overwhelmed with decode requests
-          if (_isDecodingFrame) {
-            _pendingFrame = frame;
-            return;
-          }
-
+          // Legacy/Fallback CPU Decode Path
           _decodeAndDisplayFrame(frame);
         });
       }
@@ -354,6 +360,7 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
                               _currentWidth.toDouble(),
                               _currentHeight.toDouble(),
                             ),
+                            customLabels: _modelLabels,
                           ),
                         ),
                     ],
@@ -381,6 +388,7 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
                               _currentWidth.toDouble(),
                               _currentHeight.toDouble(),
                             ),
+                            customLabels: _modelLabels,
                           ),
                         ),
                     ],
@@ -402,6 +410,7 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
                         _currentWidth.toDouble(),
                         _currentHeight.toDouble(),
                       ),
+                      customLabels: _modelLabels,
                     ),
                   ),
                 ),
@@ -470,9 +479,23 @@ class DetectionOverlayPainter extends CustomPainter {
   final List<dynamic> detections;
   final Size originalSize;
 
+  /// Optional custom labels map from ONNX model metadata
+  /// Key: classId, Value: class name
+  final Map<int, String>? customLabels;
+
+  /// Get label for a class ID
+  /// Uses customLabels from model metadata if available, otherwise falls back to 'class_N' format
+  String getLabel(int classId) {
+    if (customLabels != null && customLabels!.containsKey(classId)) {
+      return customLabels![classId]!;
+    }
+    return 'class_$classId';
+  }
+
   DetectionOverlayPainter({
     required this.detections,
     required this.originalSize,
+    this.customLabels,
   });
 
   @override
@@ -563,9 +586,11 @@ class DetectionOverlayPainter extends CustomPainter {
         // Draw label with confidence
         if (det.length >= 5) {
           final double confidence = (det[4] as num).toDouble();
-          final String label = 'object'; // Default label
+          // Use classId (index 5) to get actual label if available
+          final int classId = det.length >= 6 ? (det[5] as num).toInt() : 0;
+          final String label = getLabel(classId);
           final String text =
-              '${label} ${(confidence * 100).toStringAsFixed(1)}%';
+              '$label ${(confidence * 100).toStringAsFixed(1)}%';
 
           final textSpan = TextSpan(text: text, style: textStyle);
           final textPainter = TextPainter(

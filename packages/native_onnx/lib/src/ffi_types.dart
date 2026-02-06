@@ -134,3 +134,20 @@ typedef PreprocessImage =
       int height,
       Pointer<Float> outData,
     );
+
+// --- Session Labels FFI Types ---
+// C Function Typedef
+typedef SessionGetLabelsFunc =
+    Int32 Function(
+      Int64 sessionId,
+      Pointer<Pointer<Utf8>> outLabels,
+      Pointer<Int32> outLength,
+    );
+
+// Dart Function Typedef
+typedef SessionGetLabels =
+    int Function(
+      int sessionId,
+      Pointer<Pointer<Utf8>> outLabels,
+      Pointer<Int32> outLength,
+    );
