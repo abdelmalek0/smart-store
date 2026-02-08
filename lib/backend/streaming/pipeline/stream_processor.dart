@@ -99,28 +99,37 @@ class StreamProcessor {
           ConfigService.instance.getStreamActivePlugin(stream.id) ??
           'people_counting';
 
-      // 2. Get Plugin Configuration (Global Defaults)
-      var config = ConfigService.instance.getGlobalPluginConfig(pluginId);
+      // 2. Get Plugin Configuration
+      // Start with global defaults
+      var config = ConfigService.instance.getGlobalPluginConfig(pluginId) ?? {};
 
-      // Default config fallback
-      if (config == null) {
-        config = {
-          'pluginId': pluginId,
-          'modelPath': 'assets/models/yolov5n.rknn',
-        };
+      // Overlay stream-specific configuration if available
+      final streamConfig = ConfigService.instance.getPluginConfig(
+        stream.id,
+        pluginId,
+      );
+      if (streamConfig != null) {
+        config.addAll(streamConfig);
+      }
+
+      // Default config fallback if still empty or missing critical keys
+      if (config.isEmpty || !config.containsKey('modelPath')) {
+        // Only apply defaults if not already present
+        if (!config.containsKey('modelPath')) {
+          config['modelPath'] = 'assets/models/yolov5n.rknn';
+        }
 
         if (pluginId == 'kitchen_supervision') {
-          config['handClassId'] = 4; // 'no-gloves' is index 4
-          config['confidenceThreshold'] = 0.5;
+          config.putIfAbsent('handClassId', () => 4);
+          config.putIfAbsent('confidenceThreshold', () => 0.5);
         } else {
-          // Default to people counting
-          config['personClassId'] = 0;
-          config['confidenceThreshold'] = 0.5;
+          config.putIfAbsent('personClassId', () => 0);
+          config.putIfAbsent('confidenceThreshold', () => 0.5);
         }
-      } else {
-        // Ensure pluginId is set in config
-        config['pluginId'] = pluginId;
       }
+
+      // Ensure pluginId is set in config
+      config['pluginId'] = pluginId;
 
       // Ensure pluginType is set for PluginManager
       config['pluginType'] = pluginId;
@@ -482,10 +491,11 @@ class StreamProcessor {
     debugPrint("Processor unfrozen for ${stream.id} - inference restarted");
   }
 
-  Future<void> showFrame(int timestamp) async {
+  Future<bool> showFrame(int timestamp) async {
     if (_nativeVideoId > 0) {
-      await FFmpegVideoService.showFrame(_nativeVideoId, timestamp);
+      return await FFmpegVideoService.showFrame(_nativeVideoId, timestamp);
     }
+    return false;
   }
 
   /// Dispose the processor and release all resources

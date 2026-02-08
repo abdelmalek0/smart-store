@@ -57,10 +57,30 @@ class ConfigService {
 
     final streams = _config['streams'] as Map<String, dynamic>;
     streams.forEach((streamId, data) {
-      if (data is Map && data.containsKey('modelPath')) {
-        final modelPath = data['modelPath'];
-        if (modelPath != null && modelPath is String) {
-          mappings[streamId] = modelPath;
+      if (data is Map) {
+        // 1. Check Active Plugin config
+        final activePluginId = data['activePluginId'] ?? 'people_counting';
+        if (data.containsKey('plugins')) {
+          final plugins = data['plugins'] as Map<String, dynamic>;
+          if (plugins.containsKey(activePluginId)) {
+            final pluginConfig =
+                plugins[activePluginId] as Map<String, dynamic>;
+            if (pluginConfig.containsKey('modelPath')) {
+              final path = pluginConfig['modelPath'];
+              if (path is String && path.isNotEmpty) {
+                mappings[streamId] = path;
+                return;
+              }
+            }
+          }
+        }
+
+        // 2. Fallback: Legacy stream-level modelPath
+        if (data.containsKey('modelPath')) {
+          final modelPath = data['modelPath'];
+          if (modelPath != null && modelPath is String) {
+            mappings[streamId] = modelPath;
+          }
         }
       }
     });
@@ -72,17 +92,39 @@ class ConfigService {
     if (!_config.containsKey('streams')) return null;
     final streams = _config['streams'] as Map<String, dynamic>;
     if (!streams.containsKey(streamId)) return null;
-    return streams[streamId]['modelPath'];
+
+    final streamData = streams[streamId] as Map<String, dynamic>;
+    final activePluginId = streamData['activePluginId'] ?? 'people_counting';
+
+    // 1. Try Active Plugin Config
+    if (streamData.containsKey('plugins')) {
+      final plugins = streamData['plugins'] as Map<String, dynamic>;
+      if (plugins.containsKey(activePluginId)) {
+        final pluginConfig = plugins[activePluginId] as Map<String, dynamic>;
+        return pluginConfig['modelPath'] as String?;
+      }
+    }
+
+    // 2. Fallback: Legacy
+    return streamData['modelPath'] as String?;
   }
 
   Future<void> setModelForStream(String streamId, String? modelPath) async {
-    // Legacy support or alias to plugin config
-    // We map this to the default 'people_counting' plugin config
-    await setPluginConfig(streamId, 'people_counting', {
-      'modelPath': modelPath,
-      'personClassId': 0, // defaults
-      'confidenceThreshold': 0.5,
-    });
+    // 1. Get Active Plugin (default to people_counting if not set)
+    final currentPlugin = getStreamActivePlugin(streamId) ?? 'people_counting';
+
+    // 2. Get existing config to preserve other settings
+    final existingConfig = getPluginConfig(streamId, currentPlugin) ?? {};
+
+    // 3. Update model path
+    if (modelPath == null) {
+      existingConfig.remove('modelPath');
+    } else {
+      existingConfig['modelPath'] = modelPath;
+    }
+
+    // 4. Save back to plugin config
+    await setPluginConfig(streamId, currentPlugin, existingConfig);
   }
 
   /// Get Global configuration for a plugin

@@ -142,13 +142,14 @@ static float deqnt_affine_to_f32(int8_t qnt, int32_t zp, float scale)
 
 static int process(float *input, int *anchor, int grid_h, int grid_w, int height, int width, int stride,
                    std::vector<float> &boxes, std::vector<float> &objProbs, std::vector<int> &classId,
-                   float threshold, int32_t zp, float scale)
+                   float threshold, int32_t zp, float scale, int num_classes)
 {
 
     int validCount = 0;
     int grid_len = grid_h * grid_w;
     float thres = unsigmoid(threshold);
-    printf("THRESHOLD %f", thres);
+    int prop_box_size = 5 + num_classes;
+    // printf("THRESHOLD %f", thres);
     //int8_t thres_i8 = qnt_f32_to_affine(thres, zp, scale);
     for (int a = 0; a < 3; a++)
     {
@@ -156,10 +157,10 @@ static int process(float *input, int *anchor, int grid_h, int grid_w, int height
         {
             for (int j = 0; j < grid_w; j++)
             {
-                float box_confidence = input[(PROP_BOX_SIZE * a + 4) * grid_len + i * grid_w + j];
+                float box_confidence = input[(prop_box_size * a + 4) * grid_len + i * grid_w + j];
                 if (box_confidence >= thres)
                 {
-                    int offset = (PROP_BOX_SIZE * a) * grid_len + i * grid_w + j;
+                    int offset = (prop_box_size * a) * grid_len + i * grid_w + j;
                     float *in_ptr = input + offset;
 #if 0
                     float box_x = sigmoid(deqnt_affine_to_f32(*in_ptr, zp, scale)) * 2.0 - 0.5;
@@ -180,7 +181,7 @@ static int process(float *input, int *anchor, int grid_h, int grid_w, int height
 
                     float maxClassProbs = in_ptr[5 * grid_len];
                     int maxClassId = 0;
-                    for (int k = 1; k < OBJ_CLASS_NUM; ++k)
+                    for (int k = 1; k < num_classes; ++k)
                     {
                         float prob = in_ptr[(5 + k) * grid_len];
                         if (prob > maxClassProbs)
@@ -211,7 +212,7 @@ static int process(float *input, int *anchor, int grid_h, int grid_w, int height
 
 int post_process(float *input0, float *input1, float *input2, int model_in_h, int model_in_w,
                  float conf_threshold, float nms_threshold, float scale_w, float scale_h,
-                 int pad_w, int pad_h,
+                 int pad_w, int pad_h, int num_classes,
                  std::vector<int32_t> &qnt_zps, std::vector<float> &qnt_scales,
                  detect_result_group_t *group)
 {
@@ -239,7 +240,7 @@ int post_process(float *input0, float *input1, float *input2, int model_in_h, in
     int grid_w0 = model_in_w / stride0;
     int validCount0 = 0;
     validCount0 = process(input0, (int *)anchor0, grid_h0, grid_w0, model_in_h, model_in_w,
-                          stride0, filterBoxes, objProbs, classId, conf_threshold, 0, 1);
+                          stride0, filterBoxes, objProbs, classId, conf_threshold, 0, 1, num_classes);
 
     // stride 16
     int stride1 = 16;
@@ -247,7 +248,7 @@ int post_process(float *input0, float *input1, float *input2, int model_in_h, in
     int grid_w1 = model_in_w / stride1;
     int validCount1 = 0;
     validCount1 = process(input1, (int *)anchor1, grid_h1, grid_w1, model_in_h, model_in_w,
-                          stride1, filterBoxes, objProbs, classId, conf_threshold, 0, 1);
+                          stride1, filterBoxes, objProbs, classId, conf_threshold, 0, 1, num_classes);
 
     // stride 32
     int stride2 = 32;
@@ -255,7 +256,7 @@ int post_process(float *input0, float *input1, float *input2, int model_in_h, in
     int grid_w2 = model_in_w / stride2;
     int validCount2 = 0;
     validCount2 = process(input2, (int *)anchor2, grid_h2, grid_w2, model_in_h, model_in_w,
-                          stride2, filterBoxes, objProbs, classId, conf_threshold, 0, 1);
+                          stride2, filterBoxes, objProbs, classId, conf_threshold, 0, 1, num_classes);
 
     int validCount = validCount0 + validCount1 + validCount2;
 //    LOGI("vc0: %d, vc1: %d, vc2: %d\n", validCount0, validCount1, validCount2);

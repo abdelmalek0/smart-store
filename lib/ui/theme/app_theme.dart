@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 
 class AppTheme {
   static const Color background = Color(0xFF1E1E2E);
@@ -23,7 +22,7 @@ class AppTheme {
         surface: surface,
         background: background,
       ),
-      textTheme: GoogleFonts.interTextTheme(ThemeData.dark().textTheme).apply(
+      textTheme: ThemeData.dark().textTheme.apply(
         bodyColor: text,
         displayColor: text,
       ),

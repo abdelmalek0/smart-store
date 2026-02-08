@@ -24,6 +24,7 @@ class FFmpegVideoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     private lateinit var applicationContext: android.content.Context
     private val streams = ConcurrentHashMap<Int, FFmpegStream>()
     private var nextId = AtomicInteger(1)
+    private var npuStatsDisabled = false
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         channel = MethodChannel(binding.binaryMessenger, "ffmpeg_video")
@@ -70,8 +71,8 @@ class FFmpegVideoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 val timestamp = if (timestampObj is Number) timestampObj.toLong() else null
                 
                 if (id != null && timestamp != null && streams.containsKey(id)) {
-                    streams[id]!!.showFrame(timestamp)
-                    result.success(null)
+                    val success = streams[id]!!.showFrame(timestamp)
+                    result.success(success)
                 } else {
                     result.error("INVALID_ARGS", "Stream $id or TS $timestamp not found", null)
                 }
@@ -103,60 +104,43 @@ class FFmpegVideoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                  thread {
                      try {
                          // 1. NPU Stats (Rockchip specific)
-                         // Try common paths
+                         // 1. NPU Stats (Rockchip specific)
                          var npuLoad = 0.0
-                         val paths = listOf(
-                             "/sys/kernel/debug/rknpu/load",
-                             "/sys/class/devfreq/fdab0000.npu/load"
-                         )
-                         
-                         for (path in paths) {
-                             try {
-                                 val file = java.io.File(path)
-                                 if (file.exists() && file.canRead()) {
-                                     val content = file.readText().trim()
-                                     android.util.Log.i("FFmpegVideoPlugin", "NPU raw ($path): '$content'")
-                                     
-                                     // Robust parsing for multi-core: "NPU load:  Core0: 15%, Core1:  0%, Core2:  0%,"
-                                     // We want the MAX usage across cores to show activity.
-                                     
-                                     // Regex to find all percentages: "15%", "0%"
-                                     // The log shows no space between number and %, e.g. "15%" or " 0%"
-                                     val percentMatches = Regex("(\\d+)%").findAll(content)
-                                     
-                                     var maxLoad = 0.0
-                                     var found = false
-                                     
-                                     for (match in percentMatches) {
-                                         val (valStr) = match.destructured
-                                         val v = valStr.toDoubleOrNull() ?: 0.0
-                                         if (v > maxLoad) {
-                                             maxLoad = v
+                         if (!npuStatsDisabled) {
+                             val paths = listOf(
+                                 "/sys/kernel/debug/rknpu/load",
+                                 "/sys/class/devfreq/fdab0000.npu/load"
+                             )
+                             
+                             for (path in paths) {
+                                 try {
+                                     val file = java.io.File(path)
+                                     if (file.exists() && file.canRead()) {
+                                         val content = file.readText().trim()
+                                         // android.util.Log.v("FFmpegVideoPlugin", "NPU raw ($path): '$content'") // Verbose only
+                                         
+                                         // Robust parsing for multi-core: "NPU load:  Core0: 15%, Core1:  0%, Core2:  0%,"
+                                         val percentMatches = Regex("(\\d+)%").findAll(content)
+                                         
+                                         var sumLoad = 0.0
+                                         var count = 0
+                                         
+                                         for (match in percentMatches) {
+                                             val (valStr) = match.destructured
+                                             val v = valStr.toDoubleOrNull() ?: 0.0
+                                             sumLoad += v
+                                             count++
                                          }
-                                         found = true
+                                         
+                                         if (count > 0) {
+                                             npuLoad = sumLoad / count
+                                             break
+                                         }
                                      }
-                                     
-                                     if (found) {
-                                         // Normalize? If > 100, clamp.
-                                         if (maxLoad > 100.0) maxLoad = 100.0
-                                         npuLoad = maxLoad
-                                         break
-                                     }
-                                     
-                                     // Fallback if no % found: look for just numbers?
-                                     // ... existing logic ...
-                                     val matches = Regex("\\d+").findAll(content).map { it.value.toIntOrNull() }.filterNotNull().toList()
-                                     val validPercent = matches.lastOrNull { it <= 100 }
-                                     if (validPercent != null) {
-                                         npuLoad = validPercent.toDouble()
-                                         break
-                                     }
-                                     
-                                     // If we only found numbers > 100, assume it's not a % load (maybe frequency)
-                                     // and keep trying other paths or return 0
+                                 } catch(e: Exception) {
+                                     android.util.Log.w("FFmpegVideoPlugin", "Failed to read $path (Disabling NPU stats): $e")
+                                     npuStatsDisabled = true // Fail fast: disable subsequent attempts
                                  }
-                             } catch(e: Exception) {
-                                 android.util.Log.w("FFmpegVideoPlugin", "Failed to read $path: $e")
                              }
                          }
                          
@@ -292,6 +276,7 @@ class FFmpegStream(
                          // EOF Handling: Loop video if file
                          if (!url.startsWith("rtsp")) {
                              try {
+                                 frameBuffer.clear() // Clear old frames (high timestamps) to prevent pruning new ones (low timestamps)
                                  g.restart() 
                                  continue
                              } catch(e: Exception) {}
@@ -318,8 +303,8 @@ class FFmpegStream(
                         val storedBitmap = rawBitmap.copy(Bitmap.Config.ARGB_8888, false)
                         frameBuffer[timestamp] = storedBitmap
                         
-                        // Prune buffer (Max 6 frames)
-                        if (frameBuffer.size > 6) {
+                        // Prune buffer (Max 60 frames ~ 2 sec history)
+                        if (frameBuffer.size > 60) {
                             val minKey = frameBuffer.keys().asSequence().minOrNull()
                             if (minKey != null) {
                                 val old = frameBuffer.remove(minKey)
@@ -368,7 +353,7 @@ class FFmpegStream(
                     }
                     
                     // Cleanup old frames
-                    if (frameBuffer.size > 6) {
+                    if (frameBuffer.size > 60) {
                          val min = frameBuffer.keys().asSequence().minOrNull()
                          if (min != null) frameBuffer.remove(min)?.recycle()
                     }
@@ -403,15 +388,17 @@ class FFmpegStream(
         }
     }
     
-    fun showFrame(timestamp: Long) {
+    fun showFrame(timestamp: Long): Boolean {
         // Switch to synchronized mode on first command
         autoDisplay.set(false)
         
         val bitmap = frameBuffer.remove(timestamp) // Get and remove (consume)
         if (bitmap != null) {
             postRender(bitmap)
+            return true
         } else {
              // android.util.Log.w("FFmpegStream", "Frame $timestamp not found in buffer")
+             return false
         }
     }
 

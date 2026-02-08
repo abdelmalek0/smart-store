@@ -453,9 +453,37 @@ int post_process(int64_t handle, char *grid0_buf, char *grid1_buf, char *grid2_b
     // The previous code called `post_process(...)`.
     // Let's assume `post_process.h` exposes the calculation function.
     
+    // Calculate num_classes from output dimensions
+    // Assuming output 0 is [1, 3, (5+classes), H, W] or [1, 3, H, W, (5+classes)] or similar.
+    // h->output_attrs[0].dims contains the dimensions.
+    // Based on logs: "Output 0 dims: [1 3 11 80 80 ]" -> dims[2] is 11.
+    // The channel depth for anchor-based detection is (5 + classes).
+    // Let's find the dimension that represents depth.
+    int num_classes = 80; // Default fallback
+    if (h->output_attrs[0].n_dims == 5) {
+         // Heuristic: Find the dimension that is smallish (e.g. < 200) but > 5
+         // For the kitchen model: [1, 3, 11, 80, 80]. 11 is clearly depth.
+         // Standard YOLOv5: [1, 3, 85, 80, 80]
+         // If we trust the format:
+         // If NHWC (channel last): [N, A, H, W, D] -> dims[4]
+         // If NCHW (channel first-ish): [N, A, D, H, W] -> dims[2]
+         
+         // Let's look at h->output_attrs[0].dims
+         // We can try to derive it.
+         int d2 = h->output_attrs[0].dims[2];
+         int d4 = h->output_attrs[0].dims[4];
+         
+         if (d2 > 5 && d2 < 200) {
+             num_classes = d2 - 5;
+         } else if (d4 > 5 && d4 < 200) {
+             num_classes = d4 - 5;
+         }
+         LOGI("Derived num_classes from dims: %d", num_classes);
+    }
+    
     int ret = post_process((float *)grid0_buf, (float *)grid1_buf, (float *)grid2_buf,
                        h->m_in_height, h->m_in_width, BOX_THRESH, NMS_THRESH, h->scale_w, h->scale_h,
-                       h->pad_w, h->pad_h,
+                       h->pad_w, h->pad_h, num_classes,
                        h->out_zps, h->out_scales, &detect_result_group);
 
     if (ret < 0) {

@@ -26,10 +26,10 @@
 
 #define OBJ_NAME_MAX_SIZE 16
 #define OBJ_NUMB_MAX_SIZE 64
-#define OBJ_CLASS_NUM     80
 #define NMS_THRESH        0.4
 #define BOX_THRESH        0.25
-#define PROP_BOX_SIZE     (5+OBJ_CLASS_NUM)
+#define BOX_LEN           4
+// #define PROP_BOX_SIZE     (5+OBJ_CLASS_NUM) // Dynamic now
 #define BOX_LEN           4
 
 typedef struct _BOX_RECT
@@ -57,7 +57,7 @@ typedef struct _detect_result_group_t
 
 int post_process(float *input0, float *input1, float *input2, int model_in_h, int model_in_w,
                  float conf_threshold, float nms_threshold, float scale_w, float scale_h,
-                 int pad_w, int pad_h,
+                 int pad_w, int pad_h, int num_classes,
                  std::vector<int32_t> &qnt_zps, std::vector<float> &qnt_scales,
                  detect_result_group_t *group);
 

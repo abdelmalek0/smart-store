@@ -170,8 +170,17 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
 
           // B. Android Render Trigger
           // Android requires explicit 'showFrame' to update the SurfaceTexture
+          // STRICT SYNC: If native buffer doesn't have the frame, we MUST skipping updating UI.
+          // This keeps the overlay synchronized with the "stuck" video frame.
           if (Platform.isAndroid && _textureId != null) {
-            externalProcessor.showFrame(frame.decodeStartMs);
+            final success = await externalProcessor.showFrame(
+              frame.decodeStartMs,
+            );
+            if (!success) {
+              // Frame dropped/missing in native buffer.
+              // Do NOT update overlays, or they will drift ahead of the stuck video.
+              return;
+            }
           }
 
           // C. Texture Update / Repaint

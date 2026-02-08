@@ -33,14 +33,16 @@ class FFmpegVideoService {
     }
   }
 
-  static Future<void> showFrame(int id, int timestamp) async {
+  static Future<bool> showFrame(int id, int timestamp) async {
     try {
-      await _channel.invokeMethod('showFrame', {
+      final success = await _channel.invokeMethod<bool>('showFrame', {
         'id': id,
         'timestamp': timestamp,
       });
+      return success ?? false;
     } catch (e) {
       print('FFmpegVideoService.showFrame error: $e');
+      return false;
     }
   }
 
