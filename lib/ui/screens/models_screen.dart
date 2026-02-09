@@ -460,7 +460,9 @@ class ModelsScreen extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 ModernButton(
-                  label: "Pick .onnx File",
+                  label: Platform.isAndroid
+                      ? "Pick .rknn File"
+                      : "Pick .onnx File",
                   icon: Icons.folder_open,
                   onPressed: () async {
                     if (Platform.isAndroid) {
