@@ -3,10 +3,13 @@ import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:smart_store_linux/ui/theme/app_theme.dart';
 import 'package:smart_store_linux/backend/streaming/pipeline/stream_manager.dart';
 import 'package:smart_store_linux/core/models/frames.dart';
 import 'package:smart_store_linux/backend/services/texture_service.dart'; // GPU textures
+import 'package:smart_store_linux/backend/services/config_service.dart';
+import 'package:smart_store_linux/ui/providers/model_provider.dart';
 
 class DetachedStreamPlayer extends StatefulWidget {
   final String url;
@@ -39,6 +42,9 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
 
   // Model labels from ONNX metadata (received from StreamProcessor)
   Map<int, String> _modelLabels = {};
+
+  // User-uploaded custom labels (takes priority over _modelLabels)
+  Map<int, String>? _userLabels;
 
   // Stats
   int _decodeMs = 0;
@@ -78,6 +84,50 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
         // 1. Initial State Sync
         // Apply existing state if processor is already running
         if (mounted) {
+          // Get model path using same resolution logic as StreamProcessor:
+          // 1. Stream-specific plugin config
+          // 2. Global plugin config
+          // 3. Widget fallback
+          String? effectiveModelPath = ConfigService.instance.getModelForStream(
+            widget.streamId,
+          );
+
+          // Fallback to global plugin config if stream config not found
+          if (effectiveModelPath == null) {
+            final pluginId =
+                ConfigService.instance.getStreamActivePlugin(widget.streamId) ??
+                'people_counting';
+            final globalConfig = ConfigService.instance.getGlobalPluginConfig(
+              pluginId,
+            );
+            effectiveModelPath =
+                globalConfig?['modelPath'] as String? ?? widget.modelPath;
+          }
+
+          debugPrint(
+            "[LABELS] Stream: ${widget.streamId}, EffectiveModelPath: $effectiveModelPath",
+          );
+
+          // Check for user-uploaded labels from ModelProvider
+          if (effectiveModelPath != null) {
+            try {
+              final modelProvider = Provider.of<ModelProvider>(
+                context,
+                listen: false,
+              );
+              _userLabels = modelProvider.getLabelsForModelPath(
+                effectiveModelPath,
+              );
+              debugPrint(
+                "[LABELS] Found user labels: ${_userLabels?.length ?? 0} entries",
+              );
+            } catch (e) {
+              debugPrint("[LABELS] Error getting ModelProvider: $e");
+            }
+          } else {
+            debugPrint("[LABELS] No modelPath available for labels");
+          }
+
           setState(() {
             if (externalProcessor.frameWidth > 0) {
               _currentWidth = externalProcessor.frameWidth;
@@ -85,7 +135,9 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
             if (externalProcessor.frameHeight > 0) {
               _currentHeight = externalProcessor.frameHeight;
             }
-            if (externalProcessor.modelLabels.isNotEmpty) {
+            // Only use native labels if no user labels
+            if (_userLabels == null &&
+                externalProcessor.modelLabels.isNotEmpty) {
               _modelLabels = externalProcessor.modelLabels;
             }
             // For Android, check if texture ID is already available
@@ -157,9 +209,48 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
             }
           }
 
-          // Labels Sync
-          if (externalProcessor.modelLabels.isNotEmpty &&
-              _modelLabels.isEmpty) {
+          // Labels Sync - Check for user labels update from ModelProvider
+          String? syncModelPath = ConfigService.instance.getModelForStream(
+            widget.streamId,
+          );
+          if (syncModelPath == null) {
+            final pluginId =
+                ConfigService.instance.getStreamActivePlugin(widget.streamId) ??
+                'people_counting';
+            final globalConfig = ConfigService.instance.getGlobalPluginConfig(
+              pluginId,
+            );
+            syncModelPath =
+                globalConfig?['modelPath'] as String? ?? widget.modelPath;
+          }
+          if (syncModelPath != null && mounted) {
+            try {
+              final modelProvider = Provider.of<ModelProvider>(
+                context,
+                listen: false,
+              );
+              final freshUserLabels = modelProvider.getLabelsForModelPath(
+                syncModelPath,
+              );
+              if (freshUserLabels != null && freshUserLabels.isNotEmpty) {
+                if (_userLabels != freshUserLabels) {
+                  _userLabels = freshUserLabels;
+                  needsSetState = true;
+                }
+              } else if (_userLabels != null) {
+                // User cleared labels
+                _userLabels = null;
+                needsSetState = true;
+              }
+            } catch (e) {
+              // ModelProvider not available in context
+            }
+          }
+
+          // Fall back to native labels if no user labels and native available
+          if (_userLabels == null &&
+              _modelLabels.isEmpty &&
+              externalProcessor.modelLabels.isNotEmpty) {
             _modelLabels = externalProcessor.modelLabels;
             needsSetState = true;
           }
@@ -369,7 +460,7 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
                               _currentWidth.toDouble(),
                               _currentHeight.toDouble(),
                             ),
-                            customLabels: _modelLabels,
+                            customLabels: _userLabels ?? _modelLabels,
                           ),
                         ),
                     ],
@@ -397,7 +488,7 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
                               _currentWidth.toDouble(),
                               _currentHeight.toDouble(),
                             ),
-                            customLabels: _modelLabels,
+                            customLabels: _userLabels ?? _modelLabels,
                           ),
                         ),
                     ],
@@ -419,7 +510,7 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
                         _currentWidth.toDouble(),
                         _currentHeight.toDouble(),
                       ),
-                      customLabels: _modelLabels,
+                      customLabels: _userLabels ?? _modelLabels,
                     ),
                   ),
                 ),

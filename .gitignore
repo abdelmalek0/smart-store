@@ -52,5 +52,6 @@ android/.kotlin
 
 assets/*.rknn
 assets/*.onnx
+assets/*.txt
 
 android/*.hprof

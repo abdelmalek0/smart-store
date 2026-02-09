@@ -16,20 +16,32 @@ class ModelProvider extends ChangeNotifier {
   // Load persisted models on initialization
   Future<void> initialize() async {
     if (_isInitialized) return;
-    
+
     try {
       final prefs = await SharedPreferences.getInstance();
       final String? modelsJson = prefs.getString(_storageKey);
-      
+
       if (modelsJson != null) {
         final List<dynamic> modelsList = jsonDecode(modelsJson);
         _models.clear();
         for (var modelMap in modelsList) {
-          _models.add(ModelInfo(
-            id: modelMap['id'],
-            path: modelMap['path'],
-            name: modelMap['name'],
-          ));
+          // Parse customLabels if present
+          Map<int, String>? labels;
+          if (modelMap['customLabels'] != null) {
+            final labelsMap = modelMap['customLabels'] as Map<String, dynamic>;
+            labels = labelsMap.map(
+              (k, v) => MapEntry(int.parse(k), v as String),
+            );
+          }
+
+          _models.add(
+            ModelInfo(
+              id: modelMap['id'],
+              path: modelMap['path'],
+              name: modelMap['name'],
+              customLabels: labels,
+            ),
+          );
         }
       }
       _isInitialized = true;
@@ -43,11 +55,7 @@ class ModelProvider extends ChangeNotifier {
   Future<void> addModel(String path) async {
     final id = const Uuid().v4();
     final name = p.basename(path);
-    _models.add(ModelInfo(
-      id: id,
-      path: path,
-      name: name,
-    ));
+    _models.add(ModelInfo(id: id, path: path, name: name));
     await _saveModels();
     notifyListeners();
   }
@@ -58,19 +66,50 @@ class ModelProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Update custom labels for a model
+  Future<void> updateModelLabels(String id, Map<int, String>? labels) async {
+    final index = _models.indexWhere((m) => m.id == id);
+    if (index != -1) {
+      _models[index] = _models[index].copyWithLabels(labels);
+      await _saveModels();
+      notifyListeners();
+    }
+  }
+
+  /// Get labels for a model by its path (used by StreamProcessor)
+  Map<int, String>? getLabelsForModelPath(String modelPath) {
+    debugPrint("[LABELS LOOKUP] Searching for path: $modelPath");
+    debugPrint(
+      "[LABELS LOOKUP] Available models: ${_models.map((m) => '${m.path} (${m.customLabels?.length ?? 0} labels)').toList()}",
+    );
+    final model = _models.where((m) => m.path == modelPath).firstOrNull;
+    debugPrint(
+      "[LABELS LOOKUP] Found model: ${model?.name}, labels: ${model?.customLabels?.length ?? 0}",
+    );
+    return model?.customLabels;
+  }
+
   // Persist models to shared preferences
   Future<void> _saveModels() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final modelsList = _models.map((model) => {
-        'id': model.id,
-        'path': model.path,
-        'name': model.name,
-      }).toList();
+      final modelsList = _models
+          .map(
+            (model) => {
+              'id': model.id,
+              'path': model.path,
+              'name': model.name,
+              // Serialize labels with string keys for JSON compatibility
+              if (model.customLabels != null)
+                'customLabels': model.customLabels!.map(
+                  (k, v) => MapEntry(k.toString(), v),
+                ),
+            },
+          )
+          .toList();
       await prefs.setString(_storageKey, jsonEncode(modelsList));
     } catch (e) {
       debugPrint('Error saving models: $e');
     }
   }
 }
-

@@ -11,6 +11,8 @@ import org.bytedeco.javacv.Frame
 import org.bytedeco.ffmpeg.global.avcodec
 import org.bytedeco.ffmpeg.global.avutil
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.concurrent.thread
@@ -394,7 +396,30 @@ class FFmpegStream(
         
         val bitmap = frameBuffer.remove(timestamp) // Get and remove (consume)
         if (bitmap != null) {
-            postRender(bitmap)
+            // SYNC FIX: Wait for render to complete before returning
+            // This prevents overlay from updating ahead of the displayed frame
+            val latch = CountDownLatch(1)
+            renderHandler.post {
+                try {
+                    synchronized(this) {
+                        if (surface != null && surface!!.isValid) {
+                            val rect = android.graphics.Rect(0, 0, 1280, 720)
+                            val canvas = surface!!.lockCanvas(rect)
+                            if (canvas != null) {
+                                canvas.drawBitmap(bitmap, null, rect, null)
+                                surface!!.unlockCanvasAndPost(canvas)
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("FFmpegStream", "Render error: $e")
+                } finally {
+                    bitmap.recycle()
+                    latch.countDown()
+                }
+            }
+            // Wait up to 50ms for render to complete (prevents indefinite block)
+            latch.await(50, TimeUnit.MILLISECONDS)
             return true
         } else {
              // android.util.Log.w("FFmpegStream", "Frame $timestamp not found in buffer")
