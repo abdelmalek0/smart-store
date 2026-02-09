@@ -73,10 +73,10 @@ class _PluginsTabState extends State<PluginsTab> {
       currentModelPath = config['modelPath'];
     }
 
-    // Fallback default
-    if (currentModelPath == null && modelProvider.models.isNotEmpty) {
-      currentModelPath = modelProvider.models.first.path;
-    }
+    // Fallback default - REMOVED per user request
+    // if (currentModelPath == null && modelProvider.models.isNotEmpty) {
+    //   currentModelPath = modelProvider.models.first.path;
+    // }
 
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
@@ -200,7 +200,7 @@ class _PluginsTabState extends State<PluginsTab> {
                         border: Border.all(color: const Color(0xFF4B5563)),
                       ),
                       child: DropdownButtonHideUnderline(
-                        child: DropdownButton<String>(
+                        child: DropdownButton<String?>(
                           value: currentModelPath,
                           isExpanded: true,
                           dropdownColor: const Color(0xFF1F2937),
@@ -212,19 +212,28 @@ class _PluginsTabState extends State<PluginsTab> {
                             color: Colors.white,
                             fontSize: 13,
                           ),
-                          items: modelProvider.models.map((model) {
-                            return DropdownMenuItem<String>(
-                              value: model.path,
+                          items: [
+                            const DropdownMenuItem<String?>(
+                              value: null,
                               child: Text(
-                                model.name,
-                                overflow: TextOverflow.ellipsis,
+                                "None",
+                                style: TextStyle(color: Colors.grey),
                               ),
-                            );
-                          }).toList(),
+                            ),
+                            ...modelProvider.models.map((model) {
+                              return DropdownMenuItem<String?>(
+                                value: model.path,
+                                child: Text(
+                                  model.name,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              );
+                            }),
+                          ],
                           onChanged: (value) async {
-                            if (value != null) {
-                              setState(() {}); // Update UI
+                            setState(() {}); // Update UI
 
+                            if (value != null) {
                               // 1. Persist Global Defaults
                               final Map<String, dynamic> newConfig = {
                                 'modelPath': value,
@@ -243,6 +252,20 @@ class _PluginsTabState extends State<PluginsTab> {
 
                               // 2. Notify Parent/System
                               widget.onModelChanged(name, value);
+                            } else {
+                              // Clear configuration
+                              final existingConfig =
+                                  ConfigService.instance.getGlobalPluginConfig(
+                                    pluginId,
+                                  ) ??
+                                  {};
+                              existingConfig.remove('modelPath');
+                              await ConfigService.instance
+                                  .setGlobalPluginConfig(
+                                    pluginId,
+                                    existingConfig,
+                                  );
+                              widget.onModelChanged(name, "None");
                             }
                           },
                         ),

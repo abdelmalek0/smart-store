@@ -330,22 +330,24 @@ class DashboardScreen extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           _buildResourceBar(
-            "GPU Usage",
+            appProvider.supportsVRAM? "GPU Usage" : "NPU Usage",
             "${appProvider.stats['gpu']?.toStringAsFixed(1)}%",
             appProvider.stats['gpu'] ?? 0,
             Colors.greenAccent,
           ),
-          const SizedBox(height: 15),
+          if (appProvider.supportsVRAM) ...[
+            const SizedBox(height: 15),
 
-          // VRAM
-          _buildResourceBar(
-            "VRAM",
-            "${appProvider.vramUsage.toStringAsFixed(1)} / ${appProvider.vramTotal.toStringAsFixed(1)} GB",
-            appProvider.vramTotal > 0
-                ? (appProvider.vramUsage / appProvider.vramTotal) * 100
-                : 0,
-            Colors.purpleAccent,
-          ),
+            // VRAM
+            _buildResourceBar(
+              "VRAM",
+              "${appProvider.vramUsage.toStringAsFixed(1)} / ${appProvider.vramTotal.toStringAsFixed(1)} GB",
+              appProvider.vramTotal > 0
+                  ? (appProvider.vramUsage / appProvider.vramTotal) * 100
+                  : 0,
+              Colors.purpleAccent,
+            ),
+          ],
         ],
       ),
     );

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 
 class AppProvider extends ChangeNotifier {
   bool _isEngineRunning = false;
@@ -19,6 +20,10 @@ class AppProvider extends ChangeNotifier {
   double get vramUsage => _vramUsage;
   double get vramTotal => _vramTotal;
   double get ramTotal => _ramTotal;
+
+  bool get supportsVRAM =>
+      defaultTargetPlatform == TargetPlatform.linux ||
+      defaultTargetPlatform == TargetPlatform.windows;
 
   void toggleEngine() {
     _isEngineRunning = !_isEngineRunning;

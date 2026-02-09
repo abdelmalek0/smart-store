@@ -81,13 +81,15 @@ class StreamProcessor {
   _pluginFrameSubscription; // Listen to Plugin processed frames
   StreamSubscription? _pluginEventSubscription; // Listen to Plugin events
 
+  bool _isPluginActive = false; // Flag to track if plugin is running
+
   StreamProcessor({required this.stream});
 
   /// Initialize the processor and start all loops
   Future<void> initialize() async {
     try {
       debugPrint(
-        "Starting Stream Processor for stream: ${stream.id} with Plugin Architecture",
+        "Starting Stream Processor for stream: ${stream.id}",
       );
 
       // Initialize Plugin Manager
@@ -112,20 +114,28 @@ class StreamProcessor {
         config.addAll(streamConfig);
       }
 
-      // Default config fallback if still empty or missing critical keys
-      if (config.isEmpty || !config.containsKey('modelPath')) {
-        // Only apply defaults if not already present
-        if (!config.containsKey('modelPath')) {
-          config['modelPath'] = 'assets/models/yolov5n.rknn';
-        }
+      // Check for valid model path - STOP if missing
+      // We do NOT apply a default fallback anymore per user request.
+      final modelPath = config['modelPath'] as String?;
 
-        if (pluginId == 'kitchen_supervision') {
-          config.putIfAbsent('handClassId', () => 4);
-          config.putIfAbsent('confidenceThreshold', () => 0.5);
-        } else {
-          config.putIfAbsent('personClassId', () => 0);
-          config.putIfAbsent('confidenceThreshold', () => 0.5);
-        }
+      if (modelPath == null || modelPath.isEmpty) {
+         debugPrint("⚠️ No model assigned for stream ${stream.id}. Plugin will NOT start.");
+         _isPluginActive = false;
+         // We still start the read loop to show video, but skip plugin/inference init
+         _startReadLoop(null); // Pass null modelPath
+         return;
+      }
+
+      _isPluginActive = true;
+      debugPrint("✓ Model assigned: $modelPath. Starting Plugin.");
+
+      // Ensure config has necessary defaults if specific fields are missing
+      if (pluginId == 'kitchen_supervision') {
+        config.putIfAbsent('handClassId', () => 4);
+        config.putIfAbsent('confidenceThreshold', () => 0.5);
+      } else {
+        config.putIfAbsent('personClassId', () => 0);
+        config.putIfAbsent('confidenceThreshold', () => 0.5);
       }
 
       // Ensure pluginId is set in config
@@ -133,8 +143,6 @@ class StreamProcessor {
 
       // Ensure pluginType is set for PluginManager
       config['pluginType'] = pluginId;
-
-      final modelPath = config['modelPath'] ?? 'assets/models/yolov5n.rknn';
 
       // Ensure model is loaded in InferenceService (Safe to call multiple times)
       await InferenceService.instance.loadModel(modelPath);
@@ -172,7 +180,7 @@ class StreamProcessor {
   }
 
   /// Start the read loop (capture isolate)
-  void _startReadLoop(String modelPath) async {
+  void _startReadLoop(String? modelPath) async {
     _captureReceivePort = ReceivePort();
     try {
       debugPrint('SPM: Spawning isolate with modelPath=$modelPath');
@@ -182,7 +190,7 @@ class StreamProcessor {
           _captureReceivePort!.sendPort,
           stream.url,
           RootIsolateToken.instance!,
-          modelPath: modelPath, // Pass the model path
+          modelPath: modelPath, // Pass the model path (can be null)
         ),
       );
       _captureReceivePort!.listen((message) {
@@ -206,14 +214,16 @@ class StreamProcessor {
             final msgType = message[0];
 
             if (msgType == 'detections_only') {
-              // Optimized: Detections WITHOUT frame bytes
-              final width = message[1] as int;
-              final height = message[2] as int;
-              final timestamp = message[3] as int;
-              final detections = message[4] as List<dynamic>;
-              final inferenceTime = (message.length > 5)
-                  ? message[5] as double
-                  : 0.0;
+               // ... existing optimization logic ...
+               // If we are here, something sent detections.
+               // Should not happen if plugin inactive, but standard handling applies.
+               final width = message[1] as int;
+               final height = message[2] as int;
+               final timestamp = message[3] as int;
+               final detections = message[4] as List<dynamic>;
+               final inferenceTime = (message.length > 5)
+                   ? message[5] as double
+                   : 0.0;
 
               final now = DateTime.now().millisecondsSinceEpoch;
 
@@ -244,70 +254,57 @@ class StreamProcessor {
               frame = RawFrame(bytes, width, height, timestamp);
               _captureCount++; // Track capture count (moved here)
             } else if (msgType == 'processed_frame') {
-              // Optimized Linux Path: Frame + Inference received together
+               // Optimized Linux Path: Frame + Inference received together
+               // ... existing logic ...
+               if (_displayQueue.length >= DISPLAY_QUEUE_MAX_SIZE) {
+                 return; // Backpressure
+               }
 
-              //'t Backpressure: If display queue is full, drop frame BEFORE materializing bytes
-              // This saves massive GC pressure
-              if (_displayQueue.length >= DISPLAY_QUEUE_MAX_SIZE) {
-                debugPrint(
-                  "SPM: Dropping frame (Backpressure) - Q: ${_displayQueue.length}",
-                );
-                return;
-              }
+               final transferable = message[1] as TransferableTypedData;
+               final width = message[2] as int;
+               final height = message[3] as int;
+               final timestamp = message[4] as int;
+               final detections = message[5] as List<dynamic>;
+               final inferenceTime = (message.length > 6) ? message[6] as double : 0.0; // message[6]
 
-              final transferable = message[1] as TransferableTypedData;
-              final width = message[2] as int;
-              final height = message[3] as int;
-              final timestamp = message[4] as int;
-              final detections = message[5] as List<dynamic>;
-              final inferenceTime = (message.length > 6)
-                  ? message[6] as double
-                  : 0.0;
+               final bytes = transferable.materialize().asUint8List();
+               final now = DateTime.now().millisecondsSinceEpoch;
 
-              // Only materialize if we are going to use it
-              final bytes = transferable.materialize().asUint8List();
-              final now = DateTime.now().millisecondsSinceEpoch;
-
-              final processed = ProcessedFrame(
-                imageBytes: bytes,
-                width: width,
-                height: height,
-                detections: detections,
-                decodeStartMs: timestamp,
-                preprocessEndMs: now - inferenceTime.toInt(),
-                inferenceEndMs: now,
-                postprocessEndMs: now,
-              );
-
-              // Standard Logic: Add to DisplayQueue directly
-              // But we want Plugin to handle events/counting first.
-              if (!_isFrozen && _pluginManager != null) {
-                final frame = RawFrame(bytes, width, height, timestamp);
-                // Backpressure check?
-                if (_pendingPluginFrames < 2) {
-                  _pendingPluginFrames++;
-                  _pluginManager!.processDirectDetections(frame, detections);
-                }
-                // Do not add to display queue here; wait for plugin to emit it back
-              } else {
-                if (processed.width > 0) {
-                  _frameWidth = processed.width;
-                  _frameHeight = processed.height;
-                }
-                _displayQueue.add(processed);
-                if (!_isFrozen) {
-                  _inferenceFrameCounter++;
-                }
-              }
-              // _captureCount++; // Fix: Also count processed_frame as captured
-              // _inferenceFrameCounter++; // Moved to else block or plugin listener
+               final processed = ProcessedFrame(
+                 imageBytes: bytes,
+                 width: width,
+                 height: height,
+                 detections: detections,
+                 decodeStartMs: timestamp,
+                 preprocessEndMs: now - inferenceTime.toInt(),
+                 inferenceEndMs: now,
+                 postprocessEndMs: now,
+               );
+                
+               // If plugin active, route through it
+               if (_isPluginActive && !_isFrozen && _pluginManager != null) {
+                  final frame = RawFrame(bytes, width, height, timestamp);
+                   if (_pendingPluginFrames < 2) {
+                    _pendingPluginFrames++;
+                    _pluginManager!.processDirectDetections(frame, detections);
+                  }
+               } else {
+                 // PASS-THROUGH (Plugin Inactive) or Frozen
+                 // Just display the frame
+                 if (processed.width > 0) {
+                   _frameWidth = processed.width;
+                   _frameHeight = processed.height;
+                 }
+                 _displayQueue.add(processed);
+                  // Do not increment inference counter if plugin inactive?
+                  if (_isPluginActive && !_isFrozen) {
+                     _inferenceFrameCounter++;
+                  }
+               }
             } else if (msgType == 'labels') {
-              // Labels from ONNX model metadata sent by capture isolate
               final labelsMap = message[1] as Map<int, String>;
               _modelLabels = labelsMap;
-              debugPrint(
-                "📋 StreamProcessor: Received ${labelsMap.length} model labels",
-              );
+              debugPrint("📋 StreamProcessor: Received ${labelsMap.length} model labels");
             } else {
               debugPrint("Main: Unknown list message type: '$msgType'");
             }
@@ -327,11 +324,33 @@ class StreamProcessor {
 
           if (frame != null) {
             // Forward to Plugin Manager with Backpressure
-            if (!_isFrozen && _pendingPluginFrames < 2) {
+            if (_isPluginActive && !_isFrozen && _pendingPluginFrames < 2) {
               _pendingPluginFrames++;
               _pluginManager?.processFrame(frame);
+            } else if (!_isPluginActive) {
+               // PASS-THROUGH: No plugin, just display raw frame
+                final now = DateTime.now().millisecondsSinceEpoch;
+                final processed = ProcessedFrame(
+                  imageBytes: frame.bytes,
+                  width: frame.width,
+                  height: frame.height,
+                  detections: [], // Empty detections
+                  decodeStartMs: frame.decodeTimestamp,
+                  preprocessEndMs: now,
+                  inferenceEndMs: now,
+                  postprocessEndMs: now,
+                );
+                
+                if (frame.width > 0) {
+                   _frameWidth = frame.width;
+                   _frameHeight = frame.height;
+                }
+
+                if (_displayQueue.length < DISPLAY_QUEUE_MAX_SIZE) {
+                   _displayQueue.add(processed);
+                }
             } else {
-              // Drop frame to prevent overload, or handled by display queue above if optimized
+              // Drop frame (Backpressure or Frozen+PluginActive but dropping?)
             }
           }
         } catch (e, st) {
@@ -341,6 +360,7 @@ class StreamProcessor {
 
       // Start display loop separately
       _startDisplayLoop();
+
     } catch (e) {
       debugPrint("Failed to spawn capture isolate: $e");
     }
