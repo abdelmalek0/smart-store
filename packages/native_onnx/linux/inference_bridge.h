@@ -84,6 +84,12 @@ ONNX_BRIDGE_EXPORT int Video_GetFrameAndInfer(
     int64_t* out_timestamp
 );
 
+// Preprocess an image (resize, normalize, HWC->CHW)
+// in_data: RGBA pixel data
+// out_data: Float buffer for ONNX input (1x3x640x640)
+// Returns 0 on success
+ONNX_BRIDGE_EXPORT int PreprocessImage(uint8_t* in_data, int width, int height, float* out_data);
+
 // Get class labels from ONNX model metadata
 // out_labels: pointer to C string containing the labels (typically a Python dict format)
 // out_length: length of the labels string

@@ -21,6 +21,9 @@ list(APPEND PLUGIN_SOURCES
   "native_onnx_plugin.cc"
   "inference_bridge.cpp"
   "texture_manager.cpp"
+  "video_manager.cpp"
+  "inference_manager.cpp"
+  "image_processor.cpp"
 )
 
 add_library(${PLUGIN_NAME} SHARED
