@@ -3,7 +3,6 @@
 #
 
 list(APPEND FLUTTER_PLUGIN_LIST
-  fvp
   native_onnx
   screen_retriever_linux
   window_manager

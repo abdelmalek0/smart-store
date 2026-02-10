@@ -78,14 +78,14 @@ class ModelProvider extends ChangeNotifier {
 
   /// Get labels for a model by its path (used by StreamProcessor)
   Map<int, String>? getLabelsForModelPath(String modelPath) {
-    debugPrint("[LABELS LOOKUP] Searching for path: $modelPath");
-    debugPrint(
-      "[LABELS LOOKUP] Available models: ${_models.map((m) => '${m.path} (${m.customLabels?.length ?? 0} labels)').toList()}",
-    );
+    // debugPrint("[LABELS LOOKUP] Searching for path: $modelPath");
+    // debugPrint(
+    //   "[LABELS LOOKUP] Available models: ${_models.map((m) => '${m.path} (${m.customLabels?.length ?? 0} labels)').toList()}",
+    // );
     final model = _models.where((m) => m.path == modelPath).firstOrNull;
-    debugPrint(
-      "[LABELS LOOKUP] Found model: ${model?.name}, labels: ${model?.customLabels?.length ?? 0}",
-    );
+    // debugPrint(
+    //   "[LABELS LOOKUP] Found model: ${model?.name}, labels: ${model?.customLabels?.length ?? 0}",
+    // );
     return model?.customLabels;
   }
 

@@ -13,15 +13,10 @@ dependencies:
   # File system
   path_provider: ^2.1.1
   # (Optional) For decoding images to show on screen
-  image: ^4.1.3 
-  
-  # UI & Media
-
-  
   # Video dependencies
-  fvp: ^0.35.1
-  video_player: ^2.8.1
-  
+  # fvp: ^0.35.1 (Removed)
+  # video_player: ^2.8.1 (Removed)
+
   # Utilities
   shared_preferences: ^2.2.0
   uuid: ^4.0.0

@@ -74,9 +74,13 @@ class LinuxStreamSyncManager extends StreamSyncManager {
 
       if (!success) return false;
 
-      // Signal Flutter texture is ready
-      TextureService().updateTexture(_textureId!);
-      return true;
+      // Re-check referencing _textureId as it might have been disposed during async wait
+      if (_textureId != null) {
+        // Signal Flutter texture is ready
+        TextureService().updateTexture(_textureId!);
+        return true;
+      }
+      return false;
     }
     // If no texture logic active (e.g. CPU mode/Fallback), return true to proceed
     return true;

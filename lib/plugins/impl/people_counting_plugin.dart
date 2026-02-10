@@ -30,9 +30,9 @@ class PeopleCountingPlugin extends SmartStorePlugin {
   Future<void> processFrame(RawFrame frame) async {
     // Run inference on every frame for smooth visualization
     // TODO: optimization - skip inference if busy, but always pass frame?
-    debugPrint("--------------------------------------------------");
-    debugPrint("People Counting Plugin Configuration:");
-    debugPrint("  Confidence Threshold: $_confidenceThreshold");
+    // debugPrint("--------------------------------------------------");
+    // debugPrint("People Counting Plugin Configuration:");
+    // debugPrint("  Confidence Threshold: $_confidenceThreshold");
     requestInference(frame, _modelPath);
   }
 
@@ -56,11 +56,11 @@ class PeopleCountingPlugin extends SmartStorePlugin {
     }
 
     // DEBUG: Log detections to verify inference
-    if (detections.isNotEmpty) {
-      debugPrint(
-        "PeopleCountingPlugin: Frame processed. Total Detections: ${detections.length}, Persons: $personCount",
-      );
-    }
+    // if (detections.isNotEmpty) {
+    // debugPrint(
+    //   "PeopleCountingPlugin: Frame processed. Total Detections: ${detections.length}, Persons: $personCount",
+    // );
+    // }
 
     // Smoothing logic (simple moving average)
     _recentCounts.add(personCount);
@@ -78,9 +78,9 @@ class PeopleCountingPlugin extends SmartStorePlugin {
                 .round();
 
       // DEBUG: Log event triggering
-      debugPrint(
-        "PeopleCountingPlugin: Check. Count: $avgCount (Recent: $_recentCounts)",
-      );
+      // debugPrint(
+      //   "PeopleCountingPlugin: Check. Count: $avgCount (Recent: $_recentCounts)",
+      // );
 
       // Requirement: Only emit if people are detected (> 0)
       if (avgCount > 0) {

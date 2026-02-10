@@ -105,11 +105,11 @@ class KitchenSupervisionPlugin extends SmartStorePlugin {
       final inferenceEndMs = DateTime.now().millisecondsSinceEpoch;
 
       // DEBUG: Log detections similar to PeopleCountingPlugin
-      if (detections.isNotEmpty) {
-        debugPrint(
-          "KitchenSupervisionPlugin [$streamId]: Frame processed. Total Detections: ${detections.length}, Hands: ${handDetections.length}, Hand Detected: $handDetected",
-        );
-      }
+      // if (detections.isNotEmpty) {
+      // debugPrint(
+      //   "KitchenSupervisionPlugin [$streamId]: Frame processed. Total Detections: ${detections.length}, Hands: ${handDetections.length}, Hand Detected: $handDetected",
+      // );
+      // }
 
       emitDisplayFrame(frame, handDetections, {
         'decode': 0,

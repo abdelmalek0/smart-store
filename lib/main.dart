@@ -1,7 +1,6 @@
 import 'dart:io' show Platform, exit;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:fvp/fvp.dart' as fvp;
 import 'package:permission_handler/permission_handler.dart';
 import 'package:native_onnx/src/native_inference_service.dart';
 
@@ -20,7 +19,6 @@ import 'package:smart_store_linux/backend/services/resource_monitor/android/andr
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  fvp.registerWith();
 
   // Only initialize window_manager on desktop platforms
   if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
