@@ -20,7 +20,7 @@ class AppTheme {
         primary: primary,
         secondary: accent,
         surface: surface,
-        background: background,
+        surfaceContainerHighest: background,
       ),
       textTheme: ThemeData.dark().textTheme.apply(
         bodyColor: text,

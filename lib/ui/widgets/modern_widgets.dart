@@ -26,12 +26,14 @@ class _ModernSidebarBtnState extends State<ModernSidebarBtn> {
 
   @override
   Widget build(BuildContext context) {
-    final color = widget.isSelected ? AppTheme.accent : AppTheme.text.withOpacity(0.7);
+    final color = widget.isSelected
+        ? AppTheme.accent
+        : AppTheme.text.withValues(alpha: 0.7);
     final bgColor = widget.isSelected
-        ? AppTheme.accent.withOpacity(0.1)
+        ? AppTheme.accent.withValues(alpha: 0.1)
         : _isHovered
-            ? Colors.white.withOpacity(0.05)
-            : Colors.transparent;
+        ? Colors.white.withValues(alpha: 0.05)
+        : Colors.transparent;
 
     return MouseRegion(
       onEnter: (_) => setState(() => _isHovered = true),
@@ -47,11 +49,13 @@ class _ModernSidebarBtnState extends State<ModernSidebarBtn> {
             color: bgColor,
             borderRadius: BorderRadius.circular(8),
             border: widget.isSelected
-                ? Border.all(color: AppTheme.accent.withOpacity(0.3))
+                ? Border.all(color: AppTheme.accent.withValues(alpha: 0.3))
                 : Border.all(color: Colors.transparent),
           ),
           child: Row(
-            mainAxisAlignment: widget.isExpanded ? MainAxisAlignment.start : MainAxisAlignment.center,
+            mainAxisAlignment: widget.isExpanded
+                ? MainAxisAlignment.start
+                : MainAxisAlignment.center,
             children: [
               Icon(widget.icon, color: color, size: 20),
               if (widget.isExpanded) ...[
@@ -61,7 +65,9 @@ class _ModernSidebarBtnState extends State<ModernSidebarBtn> {
                     widget.label,
                     style: TextStyle(
                       color: color,
-                      fontWeight: widget.isSelected ? FontWeight.w600 : FontWeight.w500,
+                      fontWeight: widget.isSelected
+                          ? FontWeight.w600
+                          : FontWeight.w500,
                       fontSize: 14,
                     ),
                     overflow: TextOverflow.ellipsis,
@@ -94,9 +100,7 @@ class ModernHeader extends StatelessWidget {
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
         color: AppTheme.background,
-        border: Border(
-          bottom: BorderSide(color: AppTheme.surface, width: 1),
-        ),
+        border: Border(bottom: BorderSide(color: AppTheme.surface, width: 1)),
       ),
       child: Row(
         children: [
@@ -117,7 +121,7 @@ class ModernHeader extends StatelessWidget {
                   subtitle!,
                   style: TextStyle(
                     fontSize: 14,
-                    color: AppTheme.text.withOpacity(0.6),
+                    color: AppTheme.text.withValues(alpha: 0.6),
                   ),
                 ),
               ],
@@ -150,10 +154,10 @@ class ModernCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: backgroundColor ?? AppTheme.surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white.withOpacity(0.05)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.2),
+            color: Colors.black.withValues(alpha: 0.2),
             blurRadius: 8,
             offset: const Offset(0, 4),
           ),
@@ -189,12 +193,14 @@ class _ModernButtonState extends State<ModernButton> {
 
   @override
   Widget build(BuildContext context) {
-    final baseColor = widget.isDestructive ? AppTheme.destructive : AppTheme.primary;
+    final baseColor = widget.isDestructive
+        ? AppTheme.destructive
+        : AppTheme.primary;
     final bgColor = widget.isOutline
         ? Colors.transparent
         : _isHovered
-            ? baseColor.withOpacity(0.8)
-            : baseColor;
+        ? baseColor.withValues(alpha: 0.8)
+        : baseColor;
     final textColor = widget.isOutline ? baseColor : AppTheme.background;
     final borderColor = baseColor;
 
@@ -266,7 +272,7 @@ class ModernInput extends StatelessWidget {
         decoration: InputDecoration(
           border: InputBorder.none,
           hintText: hint,
-          hintStyle: TextStyle(color: AppTheme.text.withOpacity(0.4)),
+          hintStyle: TextStyle(color: AppTheme.text.withValues(alpha: 0.4)),
         ),
       ),
     );

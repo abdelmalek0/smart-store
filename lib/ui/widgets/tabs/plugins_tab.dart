@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:smart_store_linux/backend/services/config_service.dart';
+import 'package:smart_store_linux/core/models/plugin_info.dart';
+import 'package:smart_store_linux/core/registry/plugin_registry.dart';
 import 'package:smart_store_linux/ui/providers/model_provider.dart';
 import 'package:smart_store_linux/ui/widgets/modern_widgets.dart';
+import 'package:smart_store_linux/ui/viewmodels/plugins_viewmodel.dart';
 
 class PluginsTab extends StatefulWidget {
   final Function(String, String) onModelChanged;
@@ -14,22 +17,6 @@ class PluginsTab extends StatefulWidget {
 }
 
 class _PluginsTabState extends State<PluginsTab> {
-  // Available Plugin Definitions
-  final List<Map<String, dynamic>> _availablePlugins = [
-    {
-      'id': 'people_counting',
-      'name': 'People Counting',
-      'description': 'Initializes YOLO model to count people.',
-      'isActive': true,
-    },
-    {
-      'id': 'kitchen_supervision',
-      'name': 'Kitchen Supervision',
-      'description': 'Detects bare hands (no gloves) for 5 seconds.',
-      'isActive': true,
-    },
-  ];
-
   @override
   Widget build(BuildContext context) {
     return Consumer<ModelProvider>(
@@ -44,9 +31,9 @@ class _PluginsTabState extends State<PluginsTab> {
             Expanded(
               child: ListView.builder(
                 padding: const EdgeInsets.symmetric(horizontal: 24),
-                itemCount: _availablePlugins.length,
+                itemCount: PluginRegistry.plugins.length,
                 itemBuilder: (context, index) {
-                  final plugin = _availablePlugins[index];
+                  final plugin = PluginRegistry.plugins[index];
                   return _buildPluginCard(plugin, modelProvider);
                 },
               ),
@@ -57,21 +44,15 @@ class _PluginsTabState extends State<PluginsTab> {
     );
   }
 
-  Widget _buildPluginCard(
-    Map<String, dynamic> plugin,
-    ModelProvider modelProvider,
-  ) {
-    final name = plugin['name'] as String;
-    final description = plugin['description'] as String;
-    final pluginId = plugin['id'] as String;
-    final isEnabled = plugin['isActive'] as bool;
+  Widget _buildPluginCard(PluginInfo plugin, ModelProvider modelProvider) {
+    final name = plugin.name;
+    final description = plugin.description;
+    final pluginId = plugin.id;
+    final isEnabled = plugin.isActive;
 
-    // Load persisted GLOBAL model for this plugin
-    String? currentModelPath;
-    final config = ConfigService.instance.getGlobalPluginConfig(pluginId);
-    if (config != null && config.containsKey('modelPath')) {
-      currentModelPath = config['modelPath'];
-    }
+    // Load persisted GLOBAL model via ViewModel pattern
+    final vm = PluginsViewModel(modelProvider: modelProvider);
+    final currentModelPath = vm.getModelPathForPlugin(pluginId);
 
     // Fallback default - REMOVED per user request
     // if (currentModelPath == null && modelProvider.models.isNotEmpty) {
@@ -98,7 +79,7 @@ class _PluginsTabState extends State<PluginsTab> {
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Icon(
-                  isEnabled ? Icons.extension : Icons.construction,
+                  plugin.icon,
                   color: isEnabled ? const Color(0xFF3B82F6) : Colors.grey,
                   size: 24,
                 ),

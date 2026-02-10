@@ -1,6 +1,6 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:smart_store_linux/backend/streaming/pipeline/stream_manager.dart';
+import 'package:smart_store_linux/ui/viewmodels/events_viewmodel.dart';
 
 class EventsTab extends StatefulWidget {
   const EventsTab({super.key});
@@ -10,56 +10,24 @@ class EventsTab extends StatefulWidget {
 }
 
 class _EventsTabState extends State<EventsTab> {
-  final List<Map<String, dynamic>> _events = [];
-
-  // Track subscriptions by streamID
-  final Map<String, StreamSubscription> _subscriptions = {};
+  late final EventsViewModel _vm;
 
   @override
   void initState() {
     super.initState();
-    // Initial load
-    _updateSubscriptions();
+    _vm = EventsViewModel();
+    _vm.addListener(_onViewModelChanged);
+  }
 
-    // Listen to StreamManager for new streams
-    StreamProcessManager.instance.addListener(_updateSubscriptions);
+  void _onViewModelChanged() {
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
-    StreamProcessManager.instance.removeListener(_updateSubscriptions);
-    for (var sub in _subscriptions.values) {
-      sub.cancel();
-    }
+    _vm.removeListener(_onViewModelChanged);
+    _vm.dispose();
     super.dispose();
-  }
-
-  void _updateSubscriptions() {
-    final processors = StreamProcessManager.instance.processors;
-
-    // Subscribe to new processors
-    processors.forEach((streamId, processor) {
-      if (!_subscriptions.containsKey(streamId)) {
-        _subscriptions[streamId] = processor.eventStream.listen((event) {
-          if (mounted) {
-            setState(() {
-              _events.insert(0, event); // Add to top
-              if (_events.length > 100) _events.removeLast();
-            });
-          }
-        });
-      }
-    });
-
-    // Determine removed processors (Optional cleanup)
-    final currentIds = processors.keys.toSet();
-    final subscribedIds = _subscriptions.keys.toSet();
-    final removedIds = subscribedIds.difference(currentIds);
-
-    for (var id in removedIds) {
-      _subscriptions[id]?.cancel();
-      _subscriptions.remove(id);
-    }
   }
 
   @override
@@ -72,7 +40,7 @@ class _EventsTabState extends State<EventsTab> {
           const SizedBox(height: 16),
 
           Expanded(
-            child: _events.isEmpty
+            child: _vm.events.isEmpty
                 ? Center(
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
@@ -99,9 +67,9 @@ class _EventsTabState extends State<EventsTab> {
                   )
                 : ListView.builder(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
-                    itemCount: _events.length,
+                    itemCount: _vm.events.length,
                     itemBuilder: (context, index) {
-                      final event = _events[index];
+                      final event = _vm.events[index];
                       // Resolve Camera Name from StreamManager
                       final streamId = event['streamId']?.toString() ?? '';
                       final processor = StreamProcessManager.instance
@@ -114,14 +82,14 @@ class _EventsTabState extends State<EventsTab> {
           ),
 
           // clear button (temporary or persistence needed?)
-          if (_events.isNotEmpty)
+          if (_vm.events.isNotEmpty)
             Padding(
               padding: const EdgeInsets.all(8.0),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   TextButton(
-                    onPressed: () => setState(() => _events.clear()),
+                    onPressed: () => _vm.clearEvents(),
                     child: const Text(
                       "Clear All",
                       style: TextStyle(color: Colors.grey),
@@ -153,26 +121,26 @@ class _EventsTabState extends State<EventsTab> {
   }
 
   void _addMockEvent() {
-    setState(() {
-      final now = DateTime.now().millisecondsSinceEpoch;
-      final types = ['CRITICAL', 'WARNING', 'INFO'];
-      final type = types[now % 3];
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final types = ['CRITICAL', 'WARNING', 'INFO'];
+    final type = types[now % 3];
 
-      String msg = "Something happened";
-      if (type == 'CRITICAL')
-        msg = "Queue limit exceeded\nCheckout 3 queue time > 5 mins.";
-      if (type == 'WARNING')
-        msg = "Low Staff Presence\nElectronics zone staff ratio below 1:5.";
-      if (type == 'INFO')
-        msg = "Restock Required\nEmpty shelf detected in Aisle 4.";
+    String msg = "Something happened";
+    if (type == 'CRITICAL') {
+      msg = "Queue limit exceeded\nCheckout 3 queue time > 5 mins.";
+    }
+    if (type == 'WARNING') {
+      msg = "Low Staff Presence\nElectronics zone staff ratio below 1:5.";
+    }
+    if (type == 'INFO') {
+      msg = "Restock Required\nEmpty shelf detected in Aisle 4.";
+    }
 
-      _events.insert(0, {
-        'eventType': type,
-        'streamId':
-            'Camera ${now % 4 + 1}', // Mock ID that might act as name if not found
-        'timestamp': now,
-        'data': {'msg': msg},
-      });
+    _vm.addEvent({
+      'eventType': type,
+      'streamId': 'Camera ${now % 4 + 1}',
+      'timestamp': now,
+      'data': {'msg': msg},
     });
   }
 }
@@ -217,7 +185,7 @@ class EventCard extends StatelessWidget {
         border: Border(left: BorderSide(color: severityColor, width: 4)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.2),
+            color: Colors.black.withValues(alpha: 0.2),
             blurRadius: 4,
             offset: const Offset(0, 2),
           ),

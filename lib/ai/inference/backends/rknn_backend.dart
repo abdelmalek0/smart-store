@@ -1,5 +1,4 @@
 import 'dart:ffi';
-import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
@@ -106,7 +105,7 @@ class RknnInferenceBackend extends InferenceBackend {
 
     // Run Inference in C++
     final count = _service.run(
-      handle!,
+      handle,
       _inputBuf!,
       _outIds!,
       _outScores!,

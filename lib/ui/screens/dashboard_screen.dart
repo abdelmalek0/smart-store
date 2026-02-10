@@ -3,9 +3,9 @@ import 'package:provider/provider.dart';
 import 'package:smart_store_linux/ui/providers/app_provider.dart';
 import 'package:smart_store_linux/ui/providers/rtsp_stream_provider.dart';
 import 'package:smart_store_linux/ui/widgets/modern_widgets.dart';
-import 'package:smart_store_linux/backend/streaming/pipeline/stream_manager.dart';
 import 'package:smart_store_linux/ui/providers/inference_provider.dart';
 import 'package:smart_store_linux/ui/providers/model_provider.dart';
+import 'package:smart_store_linux/ui/viewmodels/dashboard_viewmodel.dart';
 
 class DashboardScreen extends StatelessWidget {
   const DashboardScreen({super.key});
@@ -20,63 +20,63 @@ class DashboardScreen extends StatelessWidget {
     );
     final modelProvider = Provider.of<ModelProvider>(context, listen: false);
 
-    return SingleChildScrollView(
-      child: Column(
-        children: [
-          const ModernHeader(
-            title: "System Dashboard",
-            subtitle: "Global Overview & Health",
-          ),
-          Padding(
-            padding: const EdgeInsets.all(24.0),
+    return ChangeNotifierProvider(
+      create: (_) => DashboardViewModel(
+        appProvider: appProvider,
+        streamProvider: streamProvider,
+        inferenceProvider: inferenceProvider,
+        modelProvider: modelProvider,
+      ),
+      child: Consumer<DashboardViewModel>(
+        builder: (context, vm, _) {
+          return SingleChildScrollView(
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // 2. Main Content Grid
-                LayoutBuilder(
-                  builder: (context, constraints) {
-                    // Responsive layout: Row on wide screens, Column on narrow
-                    if (constraints.maxWidth > 900) {
-                      return Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            flex: 2,
-                            child: _buildSystemHealthCard(appProvider),
-                          ),
-                        ],
-                      );
-                    } else {
-                      return Column(
-                        children: [_buildSystemHealthCard(appProvider)],
-                      );
-                    }
-                  },
+                const ModernHeader(
+                  title: "System Dashboard",
+                  subtitle: "Global Overview & Health",
                 ),
-                const SizedBox(height: 10),
-                // 1. Top Stats Row
-                _buildStatsRow(
-                  context,
-                  appProvider,
-                  streamProvider,
-                  inferenceProvider,
-                  modelProvider,
+                Padding(
+                  padding: const EdgeInsets.all(24.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // 2. Main Content Grid
+                      LayoutBuilder(
+                        builder: (context, constraints) {
+                          // Responsive layout: Row on wide screens, Column on narrow
+                          if (constraints.maxWidth > 900) {
+                            return Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(
+                                  flex: 2,
+                                  child: _buildSystemHealthCard(appProvider),
+                                ),
+                              ],
+                            );
+                          } else {
+                            return Column(
+                              children: [_buildSystemHealthCard(appProvider)],
+                            );
+                          }
+                        },
+                      ),
+                      const SizedBox(height: 10),
+                      // 1. Top Stats Row
+                      _buildStatsRow(context, vm),
+                    ],
+                  ),
                 ),
               ],
             ),
-          ),
-        ],
+          );
+        },
       ),
     );
   }
 
-  Widget _buildStatsRow(
-    BuildContext context,
-    AppProvider appProvider,
-    RTSPStreamProvider streamProvider,
-    InferenceProvider inferenceProvider,
-    ModelProvider modelProvider,
-  ) {
+  Widget _buildStatsRow(BuildContext context, DashboardViewModel vm) {
     return LayoutBuilder(
       builder: (context, constraints) {
         // 3 items per row on wide, spacing 16. Total spacing = 16 * 2 = 32.
@@ -88,33 +88,26 @@ class DashboardScreen extends StatelessWidget {
           children: [
             _buildStatCard(
               title: "Cameras",
-              value: "${streamProvider.streams.length}",
+              value: "${vm.cameraCount}",
               icon: Icons.videocam,
               color: Colors.blueAccent,
               width: cardWidth,
             ),
             _buildStatCard(
               title: "AI Models",
-              value: "${modelProvider.models.length}",
+              value: "${vm.modelCount}",
               icon: Icons.extension,
               color: Colors.purpleAccent,
               width: cardWidth,
             ),
             _buildStatCard(
               title: "Plugins",
-              value: "2",
+              value: "${vm.pluginCount}",
               icon: Icons.layers,
               color: Colors.orangeAccent,
               width: cardWidth,
             ),
-            _buildControlCard(
-              context,
-              appProvider,
-              streamProvider,
-              inferenceProvider,
-              modelProvider,
-              width: cardWidth,
-            ),
+            _buildControlCard(context, vm, width: cardWidth),
           ],
         );
       },
@@ -169,13 +162,10 @@ class DashboardScreen extends StatelessWidget {
 
   Widget _buildControlCard(
     BuildContext context,
-    AppProvider appProvider,
-    RTSPStreamProvider streamProvider,
-    InferenceProvider inferenceProvider,
-    ModelProvider modelProvider, {
+    DashboardViewModel vm, {
     required double width,
   }) {
-    final isRunning = appProvider.isEngineRunning;
+    final isRunning = vm.isEngineRunning;
     return Container(
       width: width,
       padding: const EdgeInsets.all(16),
@@ -226,19 +216,7 @@ class DashboardScreen extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           InkWell(
-            onTap: () async {
-              final shouldRun = !appProvider.isEngineRunning;
-              appProvider.toggleEngine();
-              if (shouldRun) {
-                StreamProcessManager.instance.startAll(
-                  streamProvider.streams,
-                  inferenceProvider.streamModelMap,
-                  modelProvider.models,
-                );
-              } else {
-                await StreamProcessManager.instance.stopAll();
-              }
-            },
+            onTap: () => vm.toggleEngine(),
             child: Row(
               children: [
                 Text(
@@ -330,7 +308,7 @@ class DashboardScreen extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           _buildResourceBar(
-            appProvider.supportsVRAM? "GPU Usage" : "NPU Usage",
+            appProvider.supportsVRAM ? "GPU Usage" : "NPU Usage",
             "${appProvider.stats['gpu']?.toStringAsFixed(1)}%",
             appProvider.stats['gpu'] ?? 0,
             Colors.greenAccent,

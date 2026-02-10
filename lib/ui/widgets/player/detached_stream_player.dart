@@ -10,6 +10,8 @@ import 'package:smart_store_linux/core/models/frames.dart';
 import 'package:smart_store_linux/backend/services/texture_service.dart'; // GPU textures
 import 'package:smart_store_linux/backend/services/config_service.dart';
 import 'package:smart_store_linux/ui/providers/model_provider.dart';
+import 'package:smart_store_linux/ui/widgets/player/detection_overlay_painter.dart';
+import 'package:smart_store_linux/ui/widgets/player/stats_overlay.dart';
 
 class DetachedStreamPlayer extends StatefulWidget {
   final String url;
@@ -54,7 +56,6 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
   StreamSubscription? _frameSubscription;
 
   // Frame rate limiting - prevent UI thread overload
-  bool _isDecodingFrame = false;
   ProcessedFrame? _pendingFrame;
 
   // Track frames for averaging FPS
@@ -320,8 +321,6 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
   void _decodeAndDisplayFrame(ProcessedFrame frame) {
     if (!mounted || !_isActive) return;
 
-    _isDecodingFrame = true;
-
     // Extract timing
     final timing = frame.timingBreakdown;
 
@@ -330,7 +329,6 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
     // Schedule frame decoding after current frame to avoid blocking during build
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_isActive) {
-        _isDecodingFrame = false;
         return;
       }
 
@@ -348,7 +346,6 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
           (ui.Image image) {
             if (!mounted || !_isActive) {
               image.dispose();
-              _isDecodingFrame = false;
               return;
             }
 
@@ -392,8 +389,6 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
               _postprocessMs = timing['postprocess'] ?? 0;
             });
 
-            _isDecodingFrame = false;
-
             // Process pending frame if one arrived while we were decoding
             if (_pendingFrame != null) {
               final pending = _pendingFrame!;
@@ -405,7 +400,6 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
         );
       } catch (e) {
         debugPrint("Error decoding frame: $e");
-        _isDecodingFrame = false;
       }
     });
   }
@@ -521,207 +515,15 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
               child: CircularProgressIndicator(color: AppTheme.accent),
             ),
 
-          // Overlay Info - LARGE FPS for Release Mode
-          Positioned(
-            top: 20,
-            left: 20,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Display FPS (Big)
-                Text(
-                  "FPS: ${_fps.toStringAsFixed(1)}",
-                  style: const TextStyle(
-                    color: Colors.greenAccent,
-                    fontSize: 42,
-                    fontWeight: FontWeight.bold,
-                    shadows: [
-                      Shadow(
-                        offset: Offset(2, 2),
-                        blurRadius: 4,
-                        color: Colors.black,
-                      ),
-                    ],
-                  ),
-                ),
-                // Pipeline Stats (Smaller)
-                Container(
-                  padding: const EdgeInsets.all(4),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(0.6),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (_decodeMs > 0 || _inferenceMs > 0)
-                        Text(
-                          "D:${_decodeMs}ms I:${_inferenceMs}ms P:${_postprocessMs}ms",
-                          style: TextStyle(
-                            color: Colors.grey[300],
-                            fontSize: 12,
-                            fontFamily: 'monospace',
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
+          // Overlay Info
+          StatsOverlay(
+            fps: _fps,
+            decodeMs: _decodeMs,
+            inferenceMs: _inferenceMs,
+            postprocessMs: _postprocessMs,
           ),
         ],
       ),
     );
-  }
-}
-
-class DetectionOverlayPainter extends CustomPainter {
-  final List<dynamic> detections;
-  final Size originalSize;
-
-  /// Optional custom labels map from ONNX model metadata
-  /// Key: classId, Value: class name
-  final Map<int, String>? customLabels;
-
-  /// Get label for a class ID
-  /// Uses customLabels from model metadata if available, otherwise falls back to 'class_N' format
-  String getLabel(int classId) {
-    if (customLabels != null && customLabels!.containsKey(classId)) {
-      return customLabels![classId]!;
-    }
-    return 'class_$classId';
-  }
-
-  DetectionOverlayPainter({
-    required this.detections,
-    required this.originalSize,
-    this.customLabels,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (detections.isEmpty) return;
-
-    final Paint paint = Paint()
-      ..color = Colors.red
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 3.0;
-
-    final Paint textBgPaint = Paint()
-      ..color = Colors.red
-      ..style = PaintingStyle.fill;
-
-    const textStyle = TextStyle(
-      color: Colors.white,
-      fontSize: 12,
-      fontWeight: FontWeight.bold,
-    );
-
-    // Scale factors
-    final double scaleX = size.width / originalSize.width;
-    final double scaleY = size.height / originalSize.height;
-
-    // Fit: BoxFit.contain logic
-    // We need to match the scaling logic of Image.memory(fit: BoxFit.contain)
-    // The image is centered and scaled to fit within 'size' while maintaining aspect ratio.
-
-    double renderW = originalSize.width * scaleX;
-    double renderH = originalSize.height * scaleY;
-
-    // Actually, scaleX and scaleY are just ratios of container/original
-    // But BoxFit.contain uses the smaller ratio for BOTH dimensions.
-    double scale = 0.0;
-    double offsetX = 0.0;
-    double offsetY = 0.0;
-
-    double aspectRatio = originalSize.width / originalSize.height;
-    double containerRatio = size.width / size.height;
-
-    if (containerRatio > aspectRatio) {
-      // Container is wider than image. Image is height-constrained.
-      scale = size.height / originalSize.height;
-      offsetX = (size.width - (originalSize.width * scale)) / 2;
-    } else {
-      // Container is taller than image. Image is width-constrained.
-      scale = size.width / originalSize.width;
-      offsetY = (size.height - (originalSize.height * scale)) / 2;
-    }
-
-    for (var det in detections) {
-      // Assuming detection format: [x1, y1, x2, y2, confidence, classId]
-      // Coordinate system of detections is typically related to the INFERENCE INPUT size (640x640)
-      // OR normalized?
-      // If InferenceService returns raw YOLO output, it might be 0-640.
-      // We need to map 640x640 -> originalSize -> renderSize.
-
-      // Let's assume detections are normalized 0-1 or we know the input size (640).
-      // If we don't know, we might have misaligned boxes.
-      // Standard YOLO output from 'ort' usually needs post-processing to be usable [x,y,w,h].
-      // Since InferenceService is generic returning 'List<dynamic>', I'll assume they are [x1, y1, x2, y2, ...]
-      // relative to the 640x640 model input.
-
-      if (det is List && det.length >= 4) {
-        // Coordinates from C++ are already in original image space (e.g., 1280x720)
-        // NOT in model space (320x320) - the C++ post_process already converted them
-        double x1 = (det[0] as num).toDouble();
-        double y1 = (det[1] as num).toDouble();
-        double x2 = (det[2] as num).toDouble();
-        double y2 = (det[3] as num).toDouble();
-
-        // Transform from original image coords to screen coords
-        // The image is displayed with BoxFit.contain, so we need to:
-        // 1. Scale by the contain scale factor (same for both X and Y to maintain aspect ratio)
-        // 2. Add the centering offset
-        double screenX1 = (x1 * scale) + offsetX;
-        double screenY1 = (y1 * scale) + offsetY;
-        double screenX2 = (x2 * scale) + offsetX;
-        double screenY2 = (y2 * scale) + offsetY;
-
-        // Draw bounding box
-        canvas.drawRect(
-          Rect.fromLTRB(screenX1, screenY1, screenX2, screenY2),
-          paint,
-        );
-
-        // Draw label with confidence
-        if (det.length >= 5) {
-          final double confidence = (det[4] as num).toDouble();
-          // Use classId (index 5) to get actual label if available
-          final int classId = det.length >= 6 ? (det[5] as num).toInt() : 0;
-          final String label = getLabel(classId);
-          final String text =
-              '$label ${(confidence * 100).toStringAsFixed(1)}%';
-
-          final textSpan = TextSpan(text: text, style: textStyle);
-          final textPainter = TextPainter(
-            text: textSpan,
-            textDirection: TextDirection.ltr,
-          );
-          textPainter.layout();
-
-          // Draw background for text
-          final textOffset = Offset(
-            screenX1,
-            screenY1 - textPainter.height - 4,
-          );
-          final textBgRect = Rect.fromLTWH(
-            textOffset.dx,
-            textOffset.dy,
-            textPainter.width + 8,
-            textPainter.height + 4,
-          );
-          canvas.drawRect(textBgRect, textBgPaint);
-
-          // Draw text
-          textPainter.paint(canvas, textOffset.translate(4, 2));
-        }
-      }
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant DetectionOverlayPainter oldDelegate) {
-    return oldDelegate.detections != detections ||
-        oldDelegate.originalSize != originalSize;
   }
 }

@@ -178,7 +178,7 @@ class _CameraSidebarState extends State<CameraSidebar> {
                 boxShadow: isRunning && !isSelected
                     ? [
                         BoxShadow(
-                          color: statusColor.withOpacity(0.5),
+                          color: statusColor.withValues(alpha: 0.5),
                           blurRadius: 4,
                           spreadRadius: 1,
                         ),

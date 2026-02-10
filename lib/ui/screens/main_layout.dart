@@ -11,7 +11,6 @@ import 'package:smart_store_linux/ui/screens/configuration_screen.dart';
 import 'package:smart_store_linux/ui/screens/playback_screen.dart';
 import 'package:smart_store_linux/ui/widgets/tabs/plugins_tab.dart';
 import 'package:smart_store_linux/ui/widgets/tabs/events_tab.dart';
-import 'package:smart_store_linux/backend/streaming/pipeline/stream_manager.dart';
 
 class MainLayout extends StatefulWidget {
   const MainLayout({super.key});
@@ -73,7 +72,7 @@ class _MainLayoutState extends State<MainLayout> {
                   child: Text(
                     "Made by Smartprints Team",
                     style: TextStyle(
-                      color: AppTheme.text.withOpacity(0.5),
+                      color: AppTheme.text.withValues(alpha: 0.5),
                       fontSize: 12,
                     ),
                   ),

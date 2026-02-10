@@ -5,9 +5,10 @@ import 'package:smart_store_linux/ui/providers/rtsp_stream_provider.dart';
 import 'package:smart_store_linux/ui/providers/model_provider.dart';
 import 'package:smart_store_linux/ui/providers/inference_provider.dart';
 import 'package:smart_store_linux/ui/widgets/modern_widgets.dart';
-import 'package:smart_store_linux/ui/widgets/detached_stream_player.dart';
+import 'package:smart_store_linux/ui/widgets/player/detached_stream_player.dart';
 import 'package:smart_store_linux/backend/streaming/pipeline/stream_manager.dart';
 import 'package:smart_store_linux/ui/widgets/live/camera_sidebar.dart';
+import 'package:smart_store_linux/ui/viewmodels/playback_viewmodel.dart';
 
 class PlaybackScreen extends StatefulWidget {
   const PlaybackScreen({super.key});
@@ -17,8 +18,19 @@ class PlaybackScreen extends StatefulWidget {
 }
 
 class _PlaybackScreenState extends State<PlaybackScreen> {
-  String? _selectedStreamId;
-  bool _isSidebarOpen = true;
+  late final PlaybackViewModel _vm;
+
+  @override
+  void initState() {
+    super.initState();
+    _vm = PlaybackViewModel();
+  }
+
+  @override
+  void dispose() {
+    _vm.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -50,7 +62,7 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
                     const SizedBox(height: 16),
                     ModernLabel(
                       "No streams available.",
-                      color: AppTheme.text.withOpacity(0.5),
+                      color: AppTheme.text.withValues(alpha: 0.5),
                       fontSize: 18,
                     ),
                   ],
@@ -59,16 +71,10 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
             }
 
             // Auto-select first stream if none selected
-            if (_selectedStreamId == null &&
-                streamProvider.streams.isNotEmpty) {
-              // Schedule microtask to avoid setState during build if needed,
-              // but for local state init it's often okay or better handled in initState.
-              // Used local var init logic here for simplicity.
-              _selectedStreamId = streamProvider.streams.first.id;
-            }
+            _vm.autoSelectFirst(streamProvider.streams);
 
             final selectedStream = streamProvider.streams.firstWhere(
-              (s) => s.id == _selectedStreamId,
+              (s) => s.id == _vm.selectedStreamId,
               orElse: () => streamProvider.streams.first,
             );
 
@@ -77,10 +83,11 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
                 // Collapsible Sidebar
                 CameraSidebar(
                   streams: streamProvider.streams,
-                  selectedStreamId: _selectedStreamId,
-                  onStreamSelected: (id) =>
-                      setState(() => _selectedStreamId = id),
-                  isOpen: _isSidebarOpen,
+                  selectedStreamId: _vm.selectedStreamId,
+                  onStreamSelected: (id) {
+                    setState(() => _vm.selectStream(id));
+                  },
+                  isOpen: _vm.isSidebarOpen,
                   processManager: processManager,
                 ),
 
@@ -116,7 +123,7 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
                                     BoxShadow(
                                       color: const Color(
                                         0xFFEF4444,
-                                      ).withOpacity(0.5),
+                                      ).withValues(alpha: 0.5),
                                       blurRadius: 6,
                                       spreadRadius: 1,
                                     ),
@@ -137,13 +144,13 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
 
                               // Expand Button (Toggle Sidebar)
                               _buildHeaderButton(
-                                _isSidebarOpen
+                                _vm.isSidebarOpen
                                     ? Icons.fullscreen
                                     : Icons.fullscreen_exit,
-                                _isSidebarOpen ? "Expand" : "Collapse",
+                                _vm.isSidebarOpen ? "Expand" : "Collapse",
                                 () {
                                   setState(() {
-                                    _isSidebarOpen = !_isSidebarOpen;
+                                    _vm.toggleSidebar();
                                   });
                                 },
                                 highlight: true,
@@ -181,8 +188,8 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
                                         borderRadius: BorderRadius.circular(8),
                                         boxShadow: [
                                           BoxShadow(
-                                            color: Colors.black.withOpacity(
-                                              0.5,
+                                            color: Colors.black.withValues(
+                                              alpha: 0.5,
                                             ),
                                             blurRadius: 20,
                                             offset: const Offset(0, 10),

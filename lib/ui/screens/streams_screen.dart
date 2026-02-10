@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:smart_store_linux/ui/theme/app_theme.dart';
 import 'package:smart_store_linux/ui/providers/rtsp_stream_provider.dart';
 import 'package:smart_store_linux/ui/widgets/modern_widgets.dart';
+import 'package:smart_store_linux/ui/viewmodels/streams_viewmodel.dart';
 
 class StreamsScreen extends StatelessWidget {
   const StreamsScreen({super.key});
@@ -11,40 +12,43 @@ class StreamsScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final streamProvider = Provider.of<RTSPStreamProvider>(context);
 
-    return Column(
-      children: [
-        ModernHeader(
-          title: "Streams",
-          subtitle: "Manage RTSP streams",
-          actions: [
-            ModernButton(
-              label: "Add Stream",
-              icon: Icons.add,
-              onPressed: () => _showAddStreamDialog(context),
-            ),
-          ],
-        ),
-        const SizedBox(height: 20),
-        Expanded(
-          child: streamProvider.streams.isEmpty
-              ? _buildEmptyState(context)
-              : ListView.builder(
-                  itemCount: streamProvider.streams.length,
-                  itemBuilder: (context, index) {
-                    final stream = streamProvider.streams[index];
-                    return _buildCameraCard(context, stream, streamProvider);
-                  },
-                ),
-        ),
-      ],
+    return ChangeNotifierProvider(
+      create: (_) => StreamsViewModel(streamProvider: streamProvider),
+      child: Consumer<StreamsViewModel>(
+        builder: (context, vm, _) {
+          return Column(
+            children: [
+              ModernHeader(
+                title: "Streams",
+                subtitle: "Manage RTSP streams",
+                actions: [
+                  ModernButton(
+                    label: "Add Stream",
+                    icon: Icons.add,
+                    onPressed: () => _showAddStreamDialog(context, vm),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              Expanded(
+                child: vm.streams.isEmpty
+                    ? _buildEmptyState(context, vm)
+                    : ListView.builder(
+                        itemCount: vm.streams.length,
+                        itemBuilder: (context, index) {
+                          final stream = vm.streams[index];
+                          return _buildCameraCard(context, stream, vm);
+                        },
+                      ),
+              ),
+            ],
+          );
+        },
+      ),
     );
   }
 
-  Widget _buildCameraCard(
-    BuildContext context,
-    stream,
-    RTSPStreamProvider provider,
-  ) {
+  Widget _buildCameraCard(BuildContext context, stream, StreamsViewModel vm) {
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(16),
@@ -128,7 +132,7 @@ class StreamsScreen extends StatelessWidget {
                   Icons.delete_outline,
                   color: Color(0xFFEF4444),
                 ),
-                onPressed: () => provider.removeStream(stream.id),
+                onPressed: () => vm.removeStream(stream.id),
                 tooltip: "Remove Camera",
               ),
             ],
@@ -138,7 +142,7 @@ class StreamsScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildEmptyState(BuildContext context) {
+  Widget _buildEmptyState(BuildContext context, StreamsViewModel vm) {
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -158,14 +162,14 @@ class StreamsScreen extends StatelessWidget {
           ModernButton(
             label: "Add your first stream",
             icon: Icons.add,
-            onPressed: () => _showAddStreamDialog(context),
+            onPressed: () => _showAddStreamDialog(context, vm),
           ),
         ],
       ),
     );
   }
 
-  void _showAddStreamDialog(BuildContext context) {
+  void _showAddStreamDialog(BuildContext context, StreamsViewModel vm) {
     final urlController = TextEditingController();
     final nameController = TextEditingController();
 
@@ -202,14 +206,11 @@ class StreamsScreen extends StatelessWidget {
             child: const Text("Connect"),
             onPressed: () {
               if (urlController.text.isNotEmpty) {
-                Provider.of<RTSPStreamProvider>(
-                  context,
-                  listen: false,
-                ).addStream(
-                  urlController.text,
-                  name: nameController.text.isNotEmpty
+                vm.addStream(
+                  nameController.text.isNotEmpty
                       ? nameController.text
-                      : null,
+                      : urlController.text,
+                  urlController.text,
                 );
                 Navigator.pop(context);
               }

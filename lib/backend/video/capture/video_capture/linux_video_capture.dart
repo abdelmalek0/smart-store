@@ -7,7 +7,6 @@ library;
 
 import 'dart:async';
 import 'dart:ffi';
-import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';

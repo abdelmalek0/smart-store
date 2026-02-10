@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:isolate';
-import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:smart_store_linux/ai/inference/inference_result.dart';
 import 'package:smart_store_linux/ai/inference/worker/inference_worker.dart';

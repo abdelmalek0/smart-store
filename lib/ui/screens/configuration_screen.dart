@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:smart_store_linux/core/registry/plugin_registry.dart';
 import 'package:smart_store_linux/ui/theme/app_theme.dart';
 import 'package:smart_store_linux/ui/providers/rtsp_stream_provider.dart';
 import 'package:smart_store_linux/ui/widgets/modern_widgets.dart';
-import 'package:smart_store_linux/backend/services/config_service.dart';
+import 'package:smart_store_linux/ui/viewmodels/configuration_viewmodel.dart';
 
 class ConfigurationScreen extends StatefulWidget {
   const ConfigurationScreen({super.key});
@@ -13,15 +14,10 @@ class ConfigurationScreen extends StatefulWidget {
 }
 
 class _ConfigurationScreenState extends State<ConfigurationScreen> {
-  // Hardcoded available plugins (should match PluginsTab ideally, or come from a registry)
-  final List<Map<String, String>> _availablePlugins = [
-    {'id': 'people_counting', 'name': 'People Counting'},
-    {'id': 'kitchen_supervision', 'name': 'Kitchen Supervision'},
-  ];
-
   @override
   Widget build(BuildContext context) {
     final streamProvider = Provider.of<RTSPStreamProvider>(context);
+    final vm = ConfigurationViewModel(streamProvider: streamProvider);
 
     // Force rebuild to fetch latest config if needed?
     // Ideally we listen to a ConfigProvider, but setState on interaction works for now.
@@ -47,9 +43,8 @@ class _ConfigurationScreenState extends State<ConfigurationScreen> {
                   itemBuilder: (context, index) {
                     final stream = streamProvider.streams[index];
 
-                    // Fetch Active Plugin for this stream
-                    final activePluginId = ConfigService.instance
-                        .getStreamActivePlugin(stream.id);
+                    // Fetch Active Plugin for this stream via ViewModel
+                    final activePluginId = vm.getActivePlugin(stream.id);
 
                     return Container(
                       margin: const EdgeInsets.only(bottom: 12),
@@ -139,8 +134,8 @@ class _ConfigurationScreenState extends State<ConfigurationScreen> {
                                   child: DropdownButtonHideUnderline(
                                     child: DropdownButton<String>(
                                       value:
-                                          _availablePlugins.any(
-                                            (p) => p['id'] == activePluginId,
+                                          PluginRegistry.plugins.any(
+                                            (p) => p.id == activePluginId,
                                           )
                                           ? activePluginId
                                           : null, // Default to null (None)
@@ -166,29 +161,23 @@ class _ConfigurationScreenState extends State<ConfigurationScreen> {
                                           value: null,
                                           child: Text("None"),
                                         ),
-                                        ..._availablePlugins.map((plugin) {
-                                          final isEnabled =
-                                              plugin['id'] != 'coming_soon';
+                                        ...PluginRegistry.plugins.map((plugin) {
                                           return DropdownMenuItem<String>(
-                                            value: plugin['id'],
-                                            enabled: isEnabled,
+                                            value: plugin.id,
                                             child: Text(
-                                              plugin['name']!,
-                                              style: TextStyle(
-                                                color: isEnabled
-                                                    ? Colors.white
-                                                    : Colors.grey,
+                                              plugin.name,
+                                              style: const TextStyle(
+                                                color: Colors.white,
                                               ),
                                             ),
                                           );
-                                        }).toList(),
+                                        }),
                                       ],
                                       onChanged: (value) async {
-                                        await ConfigService.instance
-                                            .setStreamActivePlugin(
-                                              stream.id,
-                                              value,
-                                            );
+                                        await vm.setActivePlugin(
+                                          stream.id,
+                                          value,
+                                        );
                                         setState(
                                           () {},
                                         ); // Rebuild to show selection

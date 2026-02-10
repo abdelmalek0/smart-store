@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/cupertino.dart';
 import 'package:smart_store_linux/ui/theme/app_theme.dart';
 
 class Sidebar extends StatefulWidget {
@@ -77,7 +76,7 @@ class _SidebarState extends State<Sidebar> {
         margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
         decoration: BoxDecoration(
           color: isSelected
-              ? AppTheme.primary.withOpacity(0.2)
+              ? AppTheme.primary.withValues(alpha: 0.2)
               : Colors.transparent,
           borderRadius: BorderRadius.circular(8),
         ),
@@ -88,7 +87,7 @@ class _SidebarState extends State<Sidebar> {
               icon,
               color: isSelected
                   ? AppTheme.primary
-                  : AppTheme.text.withOpacity(0.7),
+                  : AppTheme.text.withValues(alpha: 0.7),
               size: 24,
             ),
             if (widget.isExpanded) ...[
@@ -99,7 +98,7 @@ class _SidebarState extends State<Sidebar> {
                   style: TextStyle(
                     color: isSelected
                         ? AppTheme.primary
-                        : AppTheme.text.withOpacity(0.9),
+                        : AppTheme.text.withValues(alpha: 0.9),
                     fontWeight: isSelected
                         ? FontWeight.w600
                         : FontWeight.normal,
