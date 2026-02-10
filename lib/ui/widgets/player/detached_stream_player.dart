@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -7,12 +6,13 @@ import 'package:provider/provider.dart';
 import 'package:smart_store_linux/ui/theme/app_theme.dart';
 import 'package:smart_store_linux/backend/streaming/pipeline/stream_manager.dart';
 import 'package:smart_store_linux/core/models/frames.dart';
-import 'package:smart_store_linux/backend/services/texture_service.dart'; // GPU textures
 import 'package:smart_store_linux/backend/services/config_service.dart';
 import 'package:smart_store_linux/ui/providers/model_provider.dart';
 import 'package:smart_store_linux/ui/widgets/player/detection_overlay_painter.dart';
 import 'package:smart_store_linux/ui/widgets/player/stats_overlay.dart';
-import 'package:smart_store_linux/backend/services/video/ffmpeg_video_service.dart'; // Strict Sync
+
+import 'logic/stream_sync_manager.dart';
+import 'logic/stream_stats_tracker.dart';
 
 class DetachedStreamPlayer extends StatefulWidget {
   final String url;
@@ -35,9 +35,11 @@ class DetachedStreamPlayer extends StatefulWidget {
 class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
   bool _isActive = true;
 
+  // Delegates
+  late final StreamSyncManager _syncManager;
+  final StreamStatsTracker _statsTracker = StreamStatsTracker();
+
   // Display state
-  int? _textureId; // Flutter texture ID for rendering
-  int? _textureManagerId; // Native TextureManager ID
   ui.Image? _currentImage;
   List<dynamic> _currentDetections = [];
   int _currentWidth = 1920; // Default to full HD
@@ -49,25 +51,16 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
   // User-uploaded custom labels (takes priority over _modelLabels)
   Map<int, String>? _userLabels;
 
-  // Stats
-  int _decodeMs = 0;
-  int _inferenceMs = 0;
-  int _postprocessMs = 0;
   Timer? _fpsTimer;
   StreamSubscription? _frameSubscription;
 
   // Frame rate limiting - prevent UI thread overload
   ProcessedFrame? _pendingFrame;
 
-  // Track frames for averaging FPS
-  // Stabilized FPS - Rolling Window (last 30 frames)
-  final List<int> _frameTimestamps = [];
-  static const int fpsWindowSize = 10;
-  double _fps = 0.0;
-
   @override
   void initState() {
     super.initState();
+    _syncManager = StreamSyncManager.create(widget.streamId);
     _initialize();
   }
 
@@ -86,49 +79,7 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
         // 1. Initial State Sync
         // Apply existing state if processor is already running
         if (mounted) {
-          // Get model path using same resolution logic as StreamProcessor:
-          // 1. Stream-specific plugin config
-          // 2. Global plugin config
-          // 3. Widget fallback
-          String? effectiveModelPath = ConfigService.instance.getModelForStream(
-            widget.streamId,
-          );
-
-          // Fallback to global plugin config if stream config not found
-          if (effectiveModelPath == null) {
-            final pluginId =
-                ConfigService.instance.getStreamActivePlugin(widget.streamId) ??
-                'people_counting';
-            final globalConfig = ConfigService.instance.getGlobalPluginConfig(
-              pluginId,
-            );
-            effectiveModelPath =
-                globalConfig?['modelPath'] as String? ?? widget.modelPath;
-          }
-
-          debugPrint(
-            "[LABELS] Stream: ${widget.streamId}, EffectiveModelPath: $effectiveModelPath",
-          );
-
-          // Check for user-uploaded labels from ModelProvider
-          if (effectiveModelPath != null) {
-            try {
-              final modelProvider = Provider.of<ModelProvider>(
-                context,
-                listen: false,
-              );
-              _userLabels = modelProvider.getLabelsForModelPath(
-                effectiveModelPath,
-              );
-              debugPrint(
-                "[LABELS] Found user labels: ${_userLabels?.length ?? 0} entries",
-              );
-            } catch (e) {
-              debugPrint("[LABELS] Error getting ModelProvider: $e");
-            }
-          } else {
-            debugPrint("[LABELS] No modelPath available for labels");
-          }
+          _updateLabels();
 
           setState(() {
             if (externalProcessor.frameWidth > 0) {
@@ -137,41 +88,22 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
             if (externalProcessor.frameHeight > 0) {
               _currentHeight = externalProcessor.frameHeight;
             }
+
+            // Initial sync of android texture if already present
+            _syncManager.updateTextureFromProcessor(externalProcessor);
+
             // Only use native labels if no user labels
             if (_userLabels == null &&
                 externalProcessor.modelLabels.isNotEmpty) {
               _modelLabels = externalProcessor.modelLabels;
             }
-            // For Android, check if texture ID is already available
-            if (Platform.isAndroid && externalProcessor.textureId != null) {
-              _textureId = externalProcessor.textureId;
-            }
           });
         }
 
         // 2. Linux Texture Creation (Platform Specific)
-        // Android uses native texture from plugin. Linux needs explicit creation.
-        bool isLinuxTextureConnected = false;
-
-        if (Platform.isLinux) {
-          try {
-            // Create texture surface
-            final textureService = TextureService();
-            final textureResult = await textureService.createVideoTexture(
-              _currentWidth,
-              _currentHeight,
-            );
-
-            if (textureResult != null && mounted) {
-              setState(() {
-                _textureId = textureResult['textureId'];
-                _textureManagerId = textureResult['textureManagerId'];
-              });
-              // debugPrint("[TEXTURE] Created Linux Texture $_textureId");
-            }
-          } catch (e) {
-            debugPrint("[TEXTURE] Linux creation error: $e");
-          }
+        await _syncManager.initialize(_currentWidth, _currentHeight);
+        if (mounted && _syncManager.textureId != null) {
+          setState(() {}); // Reflect texture creation
         }
 
         // 3. Subscribe to Stream
@@ -185,68 +117,16 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
           bool needsSetState = false;
 
           // A. Late State Sync / Connection Logic
-
-          // Android: Pick up texture ID if it arrives late
-          if (Platform.isAndroid &&
-              _textureId == null &&
-              externalProcessor.textureId != null) {
-            _textureId = externalProcessor.textureId;
+          if (_syncManager.updateTextureFromProcessor(externalProcessor)) {
             needsSetState = true;
           }
 
           // Linux: Connect stream to texture when Video ID becomes available
-          if (Platform.isLinux &&
-              !isLinuxTextureConnected &&
-              _textureManagerId != null &&
-              externalProcessor.nativeVideoId > 0) {
-            try {
-              await TextureService().connectStreamToTexture(
-                externalProcessor.nativeVideoId,
-                _textureManagerId!,
-              );
-              isLinuxTextureConnected = true;
-              debugPrint("[TEXTURE] Connected Linux stream to texture");
-            } catch (e) {
-              // Ignore temporary connection errors
-            }
-          }
+          await _syncManager.maintainConnection(externalProcessor);
 
           // Labels Sync - Check for user labels update from ModelProvider
-          String? syncModelPath = ConfigService.instance.getModelForStream(
-            widget.streamId,
-          );
-          if (syncModelPath == null) {
-            final pluginId =
-                ConfigService.instance.getStreamActivePlugin(widget.streamId) ??
-                'people_counting';
-            final globalConfig = ConfigService.instance.getGlobalPluginConfig(
-              pluginId,
-            );
-            syncModelPath =
-                globalConfig?['modelPath'] as String? ?? widget.modelPath;
-          }
-          if (syncModelPath != null && mounted) {
-            try {
-              final modelProvider = Provider.of<ModelProvider>(
-                context,
-                listen: false,
-              );
-              final freshUserLabels = modelProvider.getLabelsForModelPath(
-                syncModelPath,
-              );
-              if (freshUserLabels != null && freshUserLabels.isNotEmpty) {
-                if (_userLabels != freshUserLabels) {
-                  _userLabels = freshUserLabels;
-                  needsSetState = true;
-                }
-              } else if (_userLabels != null) {
-                // User cleared labels
-                _userLabels = null;
-                needsSetState = true;
-              }
-            } catch (e) {
-              // ModelProvider not available in context
-            }
+          if (_updateLabels()) {
+            needsSetState = true;
           }
 
           // Fall back to native labels if no user labels and native available
@@ -261,62 +141,31 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
             setState(() {});
           }
 
-          // B. Android Render Trigger
-          // Android requires explicit 'showFrame' to update the SurfaceTexture
-          // STRICT SYNC: If native buffer doesn't have the frame, we MUST skipping updating UI.
-          // This keeps the overlay synchronized with the "stuck" video frame.
-          if (Platform.isAndroid && _textureId != null) {
-            final success = await externalProcessor.showFrame(
-              frame.decodeStartMs,
-            );
-            if (!success) {
-              // Frame dropped/missing in native buffer.
-              // Do NOT update overlays, or they will drift ahead of the stuck video.
-              return;
-            }
-          }
+          // B. Strict Sync & Render Trigger
+          // Pass timestamp to SyncManager to handle platform-specific showFrame logic
+          final canRender = await _syncManager.showFrame(
+            externalProcessor,
+            frame.decodeStartMs,
+          );
 
-          // C. Linux Strict Sync & Texture Update
-          if (Platform.isLinux &&
-              _textureManagerId != null &&
-              _textureId != null) {
-            // 1. Strict Sync: Try to show specific frame from buffer
-            final success = await FFmpegVideoService.showFrame(
-              _textureManagerId!,
-              frame.decodeStartMs,
-            );
-
-            if (!success) {
-              // Frame dropped or missing in buffer - SKIP UI UPDATE
-              // This enforces strict synchronization preventing overlay drift
-              return;
-            }
-
-            // 2. Signal Flutter that texture is ready
-            TextureService().updateTexture(_textureId!);
+          if (!canRender) {
+            // Frame dropped or missing in buffer - SKIP UI UPDATE
+            // This enforces strict synchronization preventing overlay drift
+            return;
           }
 
           // D. Update UI Data (FPS, Detections) - Optimized Path
           // Use Optimized Path if we are in Texture Mode (ignoring redundant bytes)
           // OR if we have no bytes (inference only)
-          if (_textureId != null || frame.imageBytes.isEmpty) {
+          if (_syncManager.textureId != null || frame.imageBytes.isEmpty) {
             setState(() {
               _currentDetections = frame.detections;
               _currentWidth = frame.width;
               _currentHeight = frame.height;
 
               // FPS Calc
-              final now = DateTime.now().millisecondsSinceEpoch;
-              _frameTimestamps.add(now);
-              if (_frameTimestamps.length > fpsWindowSize) {
-                _frameTimestamps.removeAt(0);
-              }
-              if (_frameTimestamps.length >= 2) {
-                final duration = _frameTimestamps.last - _frameTimestamps.first;
-                if (duration > 0) {
-                  _fps = ((_frameTimestamps.length - 1) * 1000) / duration;
-                }
-              }
+              _statsTracker.onFrameDisplayed();
+              _statsTracker.updateTiming(frame.timingBreakdown);
             });
             return;
           }
@@ -330,15 +179,60 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
     }
   }
 
+  /// Helper to update labels from ModelProvider
+  /// Returns [true] if labels changed
+  bool _updateLabels() {
+    if (!mounted) return false;
+
+    // Get model path using same resolution logic as StreamProcessor
+    String? effectiveModelPath = ConfigService.instance.getModelForStream(
+      widget.streamId,
+    );
+
+    // Fallback to global plugin config if stream config not found
+    if (effectiveModelPath == null) {
+      final pluginId =
+          ConfigService.instance.getStreamActivePlugin(widget.streamId) ??
+          'people_counting';
+      final globalConfig = ConfigService.instance.getGlobalPluginConfig(
+        pluginId,
+      );
+      effectiveModelPath =
+          globalConfig?['modelPath'] as String? ?? widget.modelPath;
+    }
+
+    // Check for user-uploaded labels from ModelProvider
+    if (effectiveModelPath != null) {
+      try {
+        final modelProvider = Provider.of<ModelProvider>(
+          context,
+          listen: false,
+        );
+        final freshUserLabels = modelProvider.getLabelsForModelPath(
+          effectiveModelPath,
+        );
+
+        if (freshUserLabels != null && freshUserLabels.isNotEmpty) {
+          if (_userLabels != freshUserLabels) {
+            _userLabels = freshUserLabels;
+            return true;
+          }
+        } else if (_userLabels != null) {
+          // User cleared labels
+          _userLabels = null;
+          return true;
+        }
+      } catch (e) {
+        // ModelProvider not available in context
+      }
+    }
+    return false;
+  }
+
   /// PROCESSED FRAME HANDLER (Legacy / Fallback)
   /// Decode and display a frame with proper UI thread management and FPS calculation
   void _decodeAndDisplayFrame(ProcessedFrame frame) {
     if (!mounted || !_isActive) return;
-
-    // Extract timing
-    final timing = frame.timingBreakdown;
-
-    final decodeStart = DateTime.now().millisecondsSinceEpoch;
 
     // Schedule frame decoding after current frame to avoid blocking during build
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -347,11 +241,6 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
       }
 
       try {
-        // Verify resolution (Native changes require full rebuild)
-        if (_frameTimestamps.length % 60 == 0) {
-          debugPrint("Frame Size: ${frame.width}x${frame.height}");
-        }
-
         ui.decodeImageFromPixels(
           frame.imageBytes,
           frame.width,
@@ -363,31 +252,9 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
               return;
             }
 
-            final decodeDuration =
-                DateTime.now().millisecondsSinceEpoch - decodeStart;
-            // Only log if slow (> 30ms) to avoid flood
-            if (decodeDuration > 30) {
-              debugPrint("⚠️ UI Decode Slow: ${decodeDuration}ms");
-            }
-
             // Calculate Stable FPS (Rolling Average)
-            final now = DateTime.now().millisecondsSinceEpoch;
-            _frameTimestamps.add(now);
-
-            // Keep only the last N timestamps
-            if (_frameTimestamps.length > fpsWindowSize) {
-              _frameTimestamps.removeAt(0); // Remove oldest
-            }
-
-            // Calculate FPS over the whole window
-            if (_frameTimestamps.length >= 2) {
-              final durationMs = _frameTimestamps.last - _frameTimestamps.first;
-              if (durationMs > 0) {
-                // FPS = (Frames - 1) / DurationSeconds
-                // Frames including the first one, but intervals are (Frames - 1)
-                _fps = ((_frameTimestamps.length - 1) * 1000) / durationMs;
-              }
-            }
+            _statsTracker.onFrameDisplayed();
+            _statsTracker.updateTiming(frame.timingBreakdown);
 
             // Update state with decoded image and FPS stats
             setState(() {
@@ -396,11 +263,6 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
               _currentDetections = frame.detections;
               _currentWidth = frame.width;
               _currentHeight = frame.height;
-
-              // Update timing breakdown
-              _decodeMs = timing['decode'] ?? 0;
-              _inferenceMs = timing['inference'] ?? 0;
-              _postprocessMs = timing['postprocess'] ?? 0;
             });
 
             // Process pending frame if one arrived while we were decoding
@@ -430,6 +292,7 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
     _frameSubscription?.cancel();
     _fpsTimer?.cancel();
     _currentImage?.dispose();
+    _syncManager.dispose();
     super.dispose();
   }
 
@@ -446,7 +309,7 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
         fit: StackFit.passthrough,
         children: [
           // 1. VIDEO LAYER
-          if (_textureId != null)
+          if (_syncManager.textureId != null)
             // TEXTURE PATH (Zero-Copy)
             Container(
               color: Colors.black,
@@ -458,7 +321,7 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
-                      Texture(textureId: _textureId!),
+                      Texture(textureId: _syncManager.textureId!),
                       // Detections Overlay
                       if (_currentDetections.isNotEmpty)
                         CustomPaint(
@@ -531,10 +394,10 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
 
           // Overlay Info
           StatsOverlay(
-            fps: _fps,
-            decodeMs: _decodeMs,
-            inferenceMs: _inferenceMs,
-            postprocessMs: _postprocessMs,
+            fps: _statsTracker.fps,
+            decodeMs: _statsTracker.decodeMs,
+            inferenceMs: _statsTracker.inferenceMs,
+            postprocessMs: _statsTracker.postprocessMs,
           ),
         ],
       ),
