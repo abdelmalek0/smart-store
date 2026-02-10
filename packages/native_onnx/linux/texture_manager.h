@@ -41,6 +41,13 @@ struct TextureInfo {
     std::unique_ptr<std::mutex> frame_mutex;
     
     TextureInfo() : frame_mutex(std::make_unique<std::mutex>()) {}
+    
+    // Frame Buffer for Strict Synchronization
+    // Stores decoded frames by timestamp until showFrame() is called
+    std::map<int64_t, cv::cuda::GpuMat> frame_buffer;
+    
+    // Auto-play mode (display immediately) until first showFrame call
+    bool auto_play = true;
 };
 
 class TextureManager {
@@ -54,11 +61,14 @@ public:
     TextureInfo* getTexture(int texture_id);
     
     // ZERO-COPY: Set pending GPU frame (called from capture thread - thread-safe)
-    bool setPendingGpuFrame(int texture_id, const cv::cuda::GpuMat& rgba_gpu);
+    bool setPendingGpuFrame(int texture_id, const cv::cuda::GpuMat& rgba_gpu, int64_t timestamp);
     
     // ZERO-COPY: Upload pending GPU frame to GL texture via CUDA interop
     // (called from UI thread with GL context)
     bool uploadPendingGpuFrame(int texture_id);
+    
+    // STRICT SYNC: Show specific frame by timestamp (called from UI thread)
+    bool showFrame(int texture_id, int64_t timestamp);
     
     // Legacy CPU methods (for fallback)
     bool updateTextureFromGpuMat(int texture_id, const cv::cuda::GpuMat& rgba_gpu);

@@ -37,6 +37,7 @@ class NativeInferenceService {
   late VideoGetFrameAndInfer _videoGetFrameAndInfer;
   late PreprocessImage _preprocessImage;
   late SessionGetLabels _getLabels;
+  late TextureShowFrame _showFrame;
 
   bool _isInitialized = false;
   Future<void>? _initFuture;
@@ -119,6 +120,10 @@ class NativeInferenceService {
         _getLabels = _lib!
             .lookupFunction<SessionGetLabelsFunc, SessionGetLabels>(
               'Session_GetLabels',
+            );
+        _showFrame = _lib!
+            .lookupFunction<TextureShowFrameFunc, TextureShowFrame>(
+              'Texture_ShowFrame',
             );
 
         _initONNX();
@@ -262,8 +267,9 @@ class NativeInferenceService {
     Pointer<Pointer<Uint8>> bufferPtr,
     Pointer<Int32> w,
     Pointer<Int32> h,
+    Pointer<Int64> timestamp,
   ) {
-    return _videoGetFrame(id, bufferPtr, w, h);
+    return _videoGetFrame(id, bufferPtr, w, h, timestamp);
   }
 
   /// Preprocess an image for inference
@@ -287,6 +293,7 @@ class NativeInferenceService {
     Pointer<Int32> width,
     Pointer<Int32> height,
     Pointer<Float> outInferenceTime,
+    Pointer<Int64> outTimestamp,
   ) {
     if (!_isInitialized) return -1;
 
@@ -307,6 +314,7 @@ class NativeInferenceService {
         width,
         height,
         outInferenceTime,
+        outTimestamp,
       );
     } finally {
       calloc.free(inputNamePtr);
@@ -416,5 +424,12 @@ class NativeInferenceService {
 
     debugPrint('[Native] Parsed ${labels.length} labels from model metadata');
     return labels;
+  }
+
+  /// Show a specific frame (Strict Synchronization)
+  /// Returns true if frame was shown, false if dropped/not found
+  bool showFrame(int textureId, int timestamp) {
+    if (!_isInitialized) return false;
+    return _showFrame(textureId, timestamp) == 0;
   }
 }

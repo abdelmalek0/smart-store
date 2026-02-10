@@ -287,16 +287,73 @@ TextureInfo* TextureManager::getTexture(int texture_id) {
 // ZERO-COPY GPU PATH (New Implementation)
 // ========================================
 
-bool TextureManager::setPendingGpuFrame(int texture_id, const cv::cuda::GpuMat& rgba_gpu) {
+bool TextureManager::setPendingGpuFrame(int texture_id, const cv::cuda::GpuMat& rgba_gpu, int64_t timestamp) {
     TextureInfo* info = getTexture(texture_id);
     if (!info) return false;
     
-    // Thread-safe: store GPU frame reference for later upload
     std::lock_guard<std::mutex> lock(*info->frame_mutex);
-    rgba_gpu.copyTo(info->pending_gpu_frame);
-    info->has_pending_gpu_frame = true;
+    
+    // 1. Store in Frame Buffer (Strict Sync)
+    // Deep copy to ensure validity - use clone() to allocate new memory
+    cv::cuda::GpuMat buffer_copy = rgba_gpu.clone();
+    info->frame_buffer[timestamp] = buffer_copy;
+    
+    // Limit buffer size (max 60 frames ~ 2 sec)
+    if (info->frame_buffer.size() > 60) {
+        // Remove oldest
+        info->frame_buffer.erase(info->frame_buffer.begin());
+    }
+    
+    // 2. Auto-Play Mode (During Warmup)
+    // If showFrame hasn't been called yet, display immediately to avoid black screen
+    if (info->auto_play) {
+        rgba_gpu.copyTo(info->pending_gpu_frame);
+        info->has_pending_gpu_frame = true;
+    }
     
     return true;
+}
+
+bool TextureManager::showFrame(int texture_id, int64_t timestamp) {
+    TextureInfo* info = getTexture(texture_id);
+    if (!info) return false;
+    
+    std::lock_guard<std::mutex> lock(*info->frame_mutex);
+    
+    // Disable auto-play once strict sync requested
+    info->auto_play = false;
+    
+    // Look for exact timestamp
+    auto it = info->frame_buffer.find(timestamp);
+    if (it != info->frame_buffer.end()) {
+        // Found! Set as pending for upload
+        // Clone effectively to ensure it survives erasure of source
+        info->pending_gpu_frame = it->second.clone();
+        info->has_pending_gpu_frame = true;
+        
+        // Remove this frame and ALL older frames (consume buffer)
+        // Note: iterators to map elements (except the erased ones) remain valid
+        auto next_it = std::next(it);
+        info->frame_buffer.erase(info->frame_buffer.begin(), next_it);
+        
+        return true;
+    }
+    
+    // Frame not found (dropped or not arrived yet)
+    // Check if we have OLDER frames than requested timestamp?
+    // If we have T1, T2 and request is T5. We should technically keep T1, T2 in case T3, T4 comes?
+    // No, if request is T5, it means UI is ready for T5. T1 and T2 are useless now.
+    // Prune everything older than timestamp
+    auto it_older = info->frame_buffer.begin();
+    while (it_older != info->frame_buffer.end() && it_older->first < timestamp) {
+         it_older = info->frame_buffer.erase(it_older);
+    }
+    
+    std::cerr << "[TextureManager] ShowFrame failed: Requested " << timestamp 
+              << ", Oldest in buffer: " << (info->frame_buffer.empty() ? -1 : info->frame_buffer.begin()->first) 
+              << ", Newest: " << (info->frame_buffer.empty() ? -1 : info->frame_buffer.rbegin()->first) << std::endl;
+
+    return false;
 }
 
 bool TextureManager::uploadPendingGpuFrame(int texture_id) {
@@ -309,7 +366,7 @@ bool TextureManager::uploadPendingGpuFrame(int texture_id) {
     {
         std::lock_guard<std::mutex> lock(*info->frame_mutex);
         if (!info->has_pending_gpu_frame) return false;
-        info->pending_gpu_frame.copyTo(frame_to_upload);
+        frame_to_upload = info->pending_gpu_frame.clone();
         info->has_pending_gpu_frame = false;
     }
     
@@ -433,7 +490,8 @@ cpu_fallback:
 
 bool TextureManager::updateTextureFromGpuMat(int texture_id, const cv::cuda::GpuMat& rgba_gpu) {
     // Use zero-copy path now
-    return setPendingGpuFrame(texture_id, rgba_gpu);
+    // Timestamps not available in legacy path, pass 0 (will work in auto-play mode)
+    return setPendingGpuFrame(texture_id, rgba_gpu, 0);
 }
 
 bool TextureManager::setPendingFrame(int texture_id, const cv::Mat& rgba_frame) {
@@ -443,7 +501,7 @@ bool TextureManager::setPendingFrame(int texture_id, const cv::Mat& rgba_frame) 
     // Upload to GPU first, then use GPU path
     cv::cuda::GpuMat gpu_frame;
     gpu_frame.upload(rgba_frame);
-    return setPendingGpuFrame(texture_id, gpu_frame);
+    return setPendingGpuFrame(texture_id, gpu_frame, 0);
 }
 
 bool TextureManager::uploadPendingFrame(int texture_id) {

@@ -66,7 +66,7 @@ ONNX_BRIDGE_EXPORT void Video_Release(int64_t video_id);
 // out_buffer: pointer to pixel data (RGBA)
 // width, height: output dimensions
 // Returns 0 on success
-ONNX_BRIDGE_EXPORT int Video_GetFrame(int64_t video_id, uint8_t** out_buffer, int* width, int* height);
+ONNX_BRIDGE_EXPORT int Video_GetFrame(int64_t video_id, uint8_t** out_buffer, int* width, int* height, int64_t* out_timestamp);
 
 // Get the next frame AND run inference on it (Zero-Copy optimization)
 // input_name: name of input node (e.g. "images")
@@ -80,7 +80,8 @@ ONNX_BRIDGE_EXPORT int Video_GetFrameAndInfer(
     uint8_t** out_frame_buffer,
     int* out_width,
     int* out_height,
-    float* out_inference_time
+    float* out_inference_time,
+    int64_t* out_timestamp
 );
 
 // Get class labels from ONNX model metadata

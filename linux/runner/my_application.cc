@@ -1,6 +1,7 @@
 #include "my_application.h"
 
 #include <flutter_linux/flutter_linux.h>
+
 #ifdef GDK_WINDOWING_X11
 #include <gdk/gdkx.h>
 #endif
@@ -147,6 +148,7 @@ extern "C" void Video_SetTextureManagerId(long long session_id, int texture_mana
 // New exported wrappers from inference_bridge.cpp (plugin)
 extern "C" int Texture_Create(int width, int height); 
 extern "C" uint32_t Texture_GetGLHandle(int texture_id);
+extern "C" int Texture_ShowFrame(int texture_id, int64_t timestamp);
 
 // Handle method calls from Dart
 static void handle_texture_method_call(FlMethodChannel* channel,
@@ -347,12 +349,49 @@ static void my_application_activate(GApplication* application) {
     FL_METHOD_CODEC(codec)
   );
   
+  // Register Native ONNX Texture Channel (Zero-Copy)
   fl_method_channel_set_method_call_handler(
-    texture_channel,
-    handle_texture_method_call,
-    g_object_ref(view),  // Pass view as user_data
-    g_object_unref       // Cleanup function
-  );
+      texture_channel, handle_texture_method_call, g_texture_registrar, nullptr);
+      
+  // Register FFmpeg Video Channel (Synchronization)
+  g_autoptr(FlStandardMethodCodec) ffmpeg_codec = fl_standard_method_codec_new();
+  g_autoptr(FlMethodChannel) ffmpeg_channel = fl_method_channel_new(
+      fl_engine_get_binary_messenger(fl_view_get_engine(view)),
+      "ffmpeg_video",
+      FL_METHOD_CODEC(ffmpeg_codec));
+      
+  fl_method_channel_set_method_call_handler(
+      ffmpeg_channel, 
+      [](FlMethodChannel* channel, FlMethodCall* method_call, gpointer user_data) {
+          const gchar* method = fl_method_call_get_name(method_call);
+          FlValue* args = fl_method_call_get_args(method_call);
+          
+          if (strcmp(method, "showFrame") == 0) {
+              // args: {textureId: int, timestamp: int}
+              if (fl_value_get_type(args) == FL_VALUE_TYPE_MAP) {
+                  FlValue* texture_id_val = fl_value_lookup_string(args, "textureId");
+                  FlValue* timestamp_val = fl_value_lookup_string(args, "timestamp");
+                  
+                  if (texture_id_val && timestamp_val) {
+                      int64_t texture_id = fl_value_get_int(texture_id_val);
+                      int64_t timestamp = fl_value_get_int(timestamp_val);
+                      
+                      // Call Native ShowFrame
+                      // Verify the function exists (it should, as we linked it)
+                      // We use Texture_ShowFrame from inference_bridge
+                      int result = Texture_ShowFrame((int)texture_id, timestamp);
+                      
+                      g_autoptr(FlValue) response = fl_value_new_bool(result == 0);
+                      fl_method_call_respond_success(method_call, response, nullptr);
+                      return;
+                  }
+              }
+              fl_method_call_respond_error(method_call, "Invalid Arguments", "Expected map {textureId, timestamp}", nullptr, nullptr);
+          } else {
+              fl_method_call_respond_not_implemented(method_call, nullptr);
+          }
+      }, 
+      nullptr, nullptr);
   
   g_print("[TEXTURE-INIT] Method channel 'native_onnx/texture' registered\n");
 

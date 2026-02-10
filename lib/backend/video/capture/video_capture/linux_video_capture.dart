@@ -31,6 +31,7 @@ class LinuxVideoCapture implements VideoCapture {
   final Pointer<Int32> _widthPtr = calloc<Int32>();
   final Pointer<Int32> _heightPtr = calloc<Int32>();
   final Pointer<Float> _inferenceTimePtr = calloc<Float>();
+  final Pointer<Int64> _timestampPtr = calloc<Int64>();
 
   /// Optimized inference session (optional)
   int? _sessionId;
@@ -151,7 +152,7 @@ class LinuxVideoCapture implements VideoCapture {
 
       final length = width * height * 4; // RGBA
       final data = Uint8List.fromList(dataPtr.asTypedList(length));
-      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final timestamp = _timestampPtr.value;
 
       // Check if this is an optimized frame with detections
       if (_sessionId != null && result == 0) {
@@ -181,6 +182,7 @@ class LinuxVideoCapture implements VideoCapture {
       _bufferPtrPtr,
       _widthPtr,
       _heightPtr,
+      _timestampPtr,
     );
   }
 
@@ -195,6 +197,7 @@ class LinuxVideoCapture implements VideoCapture {
       _widthPtr,
       _heightPtr,
       _inferenceTimePtr,
+      _timestampPtr,
     );
   }
 
@@ -225,6 +228,7 @@ class LinuxVideoCapture implements VideoCapture {
     calloc.free(_widthPtr);
     calloc.free(_heightPtr);
     calloc.free(_inferenceTimePtr);
+    calloc.free(_timestampPtr);
   }
 }
 

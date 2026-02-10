@@ -36,7 +36,8 @@ class FFmpegVideoService {
   static Future<bool> showFrame(int id, int timestamp) async {
     try {
       final success = await _channel.invokeMethod<bool>('showFrame', {
-        'id': id,
+        'id': id, // Android expects 'id'
+        'textureId': id, // Linux expects 'textureId'
         'timestamp': timestamp,
       });
       return success ?? false;

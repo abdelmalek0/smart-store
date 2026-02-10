@@ -12,6 +12,7 @@ import 'package:smart_store_linux/backend/services/config_service.dart';
 import 'package:smart_store_linux/ui/providers/model_provider.dart';
 import 'package:smart_store_linux/ui/widgets/player/detection_overlay_painter.dart';
 import 'package:smart_store_linux/ui/widgets/player/stats_overlay.dart';
+import 'package:smart_store_linux/backend/services/ffmpeg_video_service.dart'; // Strict Sync
 
 class DetachedStreamPlayer extends StatefulWidget {
   final String url;
@@ -275,10 +276,23 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
             }
           }
 
-          // C. Texture Update / Repaint
+          // C. Linux Strict Sync & Texture Update
           if (Platform.isLinux &&
               _textureManagerId != null &&
               _textureId != null) {
+            // 1. Strict Sync: Try to show specific frame from buffer
+            final success = await FFmpegVideoService.showFrame(
+              _textureManagerId!,
+              frame.decodeStartMs,
+            );
+
+            if (!success) {
+              // Frame dropped or missing in buffer - SKIP UI UPDATE
+              // This enforces strict synchronization preventing overlay drift
+              return;
+            }
+
+            // 2. Signal Flutter that texture is ready
             TextureService().updateTexture(_textureId!);
           }
 

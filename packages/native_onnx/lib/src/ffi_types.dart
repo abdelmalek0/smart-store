@@ -46,6 +46,7 @@ typedef VideoGetFrameFunc =
       Pointer<Pointer<Uint8>> outBuffer,
       Pointer<Int32> width,
       Pointer<Int32> height,
+      Pointer<Int64> outTimestamp,
     );
 
 typedef VideoGetFrameAndInferFunc =
@@ -59,6 +60,7 @@ typedef VideoGetFrameAndInferFunc =
       Pointer<Int32> outWidth,
       Pointer<Int32> outHeight,
       Pointer<Float> outInferenceTime,
+      Pointer<Int64> outTimestamp,
     );
 
 // --- Image Preprocessing C Function Typedefs ---
@@ -111,6 +113,7 @@ typedef VideoGetFrame =
       Pointer<Pointer<Uint8>> outBuffer,
       Pointer<Int32> width,
       Pointer<Int32> height,
+      Pointer<Int64> outTimestamp,
     );
 
 typedef VideoGetFrameAndInfer =
@@ -124,6 +127,7 @@ typedef VideoGetFrameAndInfer =
       Pointer<Int32> outWidth,
       Pointer<Int32> outHeight,
       Pointer<Float> outInferenceTime,
+      Pointer<Int64> outTimestamp,
     );
 
 // Image Preprocessing Dart Typedef
@@ -151,3 +155,7 @@ typedef SessionGetLabels =
       Pointer<Pointer<Utf8>> outLabels,
       Pointer<Int32> outLength,
     );
+
+// --- Texture Synchronization ---
+typedef TextureShowFrameFunc = Int32 Function(Int32 textureId, Int64 timestamp);
+typedef TextureShowFrame = int Function(int textureId, int timestamp);
