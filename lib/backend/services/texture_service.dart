@@ -1,4 +1,5 @@
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
 
 /// Service for managing native GPU textures on Linux
 class TextureService {
@@ -22,7 +23,7 @@ class TextureService {
 
       return null;
     } catch (e) {
-      print('[TextureService] Failed to create texture: $e');
+      debugPrint('[TextureService] Failed to create texture: $e');
       return null;
     }
   }
@@ -32,7 +33,7 @@ class TextureService {
     try {
       await _channel.invokeMethod('updateTexture', {'textureId': textureId});
     } catch (e) {
-      print('[TextureService] Failed to update texture: $e');
+      debugPrint('[TextureService] Failed to update texture: $e');
     }
   }
 
@@ -43,11 +44,11 @@ class TextureService {
         'videoId': videoId,
         'textureManagerId': textureManagerId,
       });
-      print(
+      debugPrint(
         '[TextureService] Connected video $videoId to texture $textureManagerId',
       );
     } catch (e) {
-      print('[TextureService] Failed to connect stream: $e');
+      debugPrint('[TextureService] Failed to connect stream: $e');
     }
   }
 }

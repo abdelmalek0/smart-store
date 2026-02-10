@@ -7,8 +7,8 @@ library;
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'android_video_capture.dart';
-import 'linux_video_capture.dart';
+import 'android/android_video_capture.dart';
+import 'linux/linux_video_capture.dart';
 
 /// Result of opening a video stream
 class VideoCaptureResult {

@@ -1,7 +1,7 @@
 /// Native ONNX Runtime Plugin for Flutter
-/// 
+///
 /// This package provides a native bridge to ONNX Runtime with GPU acceleration.
-/// 
+///
 /// Main classes:
 /// - [NativeInferenceService] - Singleton service for native inference
 /// - [NativeOrtSession] - ONNX runtime session

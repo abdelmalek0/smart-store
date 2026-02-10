@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:smart_store_linux/core/models/frames.dart';
 import 'package:smart_store_linux/plugins/base/plugin_base.dart';
+import 'package:flutter/foundation.dart';
 
 /// People Counting Plugin
 /// Detects people in the frame and emits a count event every 10 seconds.
@@ -11,7 +12,7 @@ class PeopleCountingPlugin extends SmartStorePlugin {
 
   // Smoothing
   final List<int> _recentCounts = [];
-  static const int MAX_HISTORY = 5;
+  static const int maxHistory = 5;
 
   String _modelPath = '';
 
@@ -29,9 +30,9 @@ class PeopleCountingPlugin extends SmartStorePlugin {
   Future<void> processFrame(RawFrame frame) async {
     // Run inference on every frame for smooth visualization
     // TODO: optimization - skip inference if busy, but always pass frame?
-    print("###########################################");
-    print("People counting model path: $_modelPath");
-    print("###########################################");
+    debugPrint("--------------------------------------------------");
+    debugPrint("People Counting Plugin Configuration:");
+    debugPrint("  Confidence Threshold: $_confidenceThreshold");
     requestInference(frame, _modelPath);
   }
 
@@ -56,14 +57,14 @@ class PeopleCountingPlugin extends SmartStorePlugin {
 
     // DEBUG: Log detections to verify inference
     if (detections.isNotEmpty) {
-      print(
+      debugPrint(
         "PeopleCountingPlugin: Frame processed. Total Detections: ${detections.length}, Persons: $personCount",
       );
     }
 
     // Smoothing logic (simple moving average)
     _recentCounts.add(personCount);
-    if (_recentCounts.length > MAX_HISTORY) {
+    if (_recentCounts.length > maxHistory) {
       _recentCounts.removeAt(0);
     }
 
@@ -77,7 +78,7 @@ class PeopleCountingPlugin extends SmartStorePlugin {
                 .round();
 
       // DEBUG: Log event triggering
-      print(
+      debugPrint(
         "PeopleCountingPlugin: Check. Count: $avgCount (Recent: $_recentCounts)",
       );
 

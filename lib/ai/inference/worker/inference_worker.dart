@@ -8,8 +8,8 @@ import 'package:smart_store_linux/core/config/constants.dart';
 import 'package:smart_store_linux/ai/post_processing/yolo_processor.dart';
 import 'package:smart_store_linux/ai/inference/messages.dart';
 import 'package:smart_store_linux/ai/inference/backends/inference_backend.dart';
-import 'package:smart_store_linux/ai/inference/backends/onnx_backend.dart';
-import 'package:smart_store_linux/ai/inference/backends/rknn_backend.dart';
+import 'package:smart_store_linux/ai/inference/backends/linux/onnx_backend.dart';
+import 'package:smart_store_linux/ai/inference/backends/android/rknn_backend.dart';
 
 // ============================================================================
 // WORKER ISOLATE - Handles inference in background

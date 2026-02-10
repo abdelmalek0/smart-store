@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:native_onnx/native_onnx.dart';
+
 import 'package:native_onnx/native_onnx_platform_interface.dart';
 import 'package:native_onnx/native_onnx_method_channel.dart';
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
@@ -18,11 +19,9 @@ void main() {
     expect(initialPlatform, isInstanceOf<MethodChannelNativeOnnx>());
   });
 
-  test('getPlatformVersion', () async {
-    NativeOnnx nativeOnnxPlugin = NativeOnnx();
-    MockNativeOnnxPlatform fakePlatform = MockNativeOnnxPlatform();
-    NativeOnnxPlatform.instance = fakePlatform;
-
-    expect(await nativeOnnxPlugin.getPlatformVersion(), '42');
+  test('init', () async {
+    NativeInferenceService nativeOnnxPlugin = NativeInferenceService();
+    // Verify it doesn't throw
+    await nativeOnnxPlugin.init();
   });
 }

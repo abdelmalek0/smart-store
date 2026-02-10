@@ -158,11 +158,11 @@ class YoloPostProcessor {
       bool shouldKeep = true;
 
       // Check if candidate overlaps significantly with any kept detection
-      for (final kept_detection in kept) {
+      for (final keptDetection in kept) {
         // Only compare detections of the same class
-        if (candidate.classId != kept_detection.classId) continue;
+        if (candidate.classId != keptDetection.classId) continue;
 
-        final iou = _calculateIoU(candidate, kept_detection);
+        final iou = _calculateIoU(candidate, keptDetection);
         if (iou > iouThreshold) {
           shouldKeep = false;
           break;
@@ -184,36 +184,36 @@ class YoloPostProcessor {
   /// Returns: IoU value in range [0.0, 1.0]
   static double _calculateIoU(Detection a, Detection b) {
     // Convert center coordinates to corner coordinates
-    final double a_x1 = a.x - a.width / 2;
-    final double a_y1 = a.y - a.height / 2;
-    final double a_x2 = a.x + a.width / 2;
-    final double a_y2 = a.y + a.height / 2;
+    final double aX1 = a.x - a.width / 2;
+    final double aY1 = a.y - a.height / 2;
+    final double aX2 = a.x + a.width / 2;
+    final double aY2 = a.y + a.height / 2;
 
-    final double b_x1 = b.x - b.width / 2;
-    final double b_y1 = b.y - b.height / 2;
-    final double b_x2 = b.x + b.width / 2;
-    final double b_y2 = b.y + b.height / 2;
+    final double bX1 = b.x - b.width / 2;
+    final double bY1 = b.y - b.height / 2;
+    final double bX2 = b.x + b.width / 2;
+    final double bY2 = b.y + b.height / 2;
 
     // Calculate intersection rectangle
-    final double inter_x1 = math.max(a_x1, b_x1);
-    final double inter_y1 = math.max(a_y1, b_y1);
-    final double inter_x2 = math.min(a_x2, b_x2);
-    final double inter_y2 = math.min(a_y2, b_y2);
+    final double interX1 = math.max(aX1, bX1);
+    final double interY1 = math.max(aY1, bY1);
+    final double interX2 = math.min(aX2, bX2);
+    final double interY2 = math.min(aY2, bY2);
 
     // Calculate intersection area
-    final double inter_width = math.max(0.0, inter_x2 - inter_x1);
-    final double inter_height = math.max(0.0, inter_y2 - inter_y1);
-    final double inter_area = inter_width * inter_height;
+    final double interWidth = math.max(0.0, interX2 - interX1);
+    final double interHeight = math.max(0.0, interY2 - interY1);
+    final double interArea = interWidth * interHeight;
 
     // Calculate union area
-    final double a_area = a.width * a.height;
-    final double b_area = b.width * b.height;
-    final double union_area = a_area + b_area - inter_area;
+    final double aArea = a.width * a.height;
+    final double bArea = b.width * b.height;
+    final double unionArea = aArea + bArea - interArea;
 
     // Avoid division by zero
-    if (union_area == 0.0) return 0.0;
+    if (unionArea == 0.0) return 0.0;
 
-    return inter_area / union_area;
+    return interArea / unionArea;
   }
 
   /// Scale coordinates from model space to original image space

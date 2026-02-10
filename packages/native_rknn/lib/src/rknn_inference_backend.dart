@@ -1,5 +1,5 @@
 import 'dart:ffi';
-import 'dart:typed_data';
+
 import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
 import 'package:native_rknn/src/rknn_ffi_types.dart';
@@ -77,9 +77,9 @@ class RknnInferenceBackend {
 
       // Ensure output buffers exist
       if (_outIds == null) {
-        _outIds = calloc<Int32>(OBJ_NUMB_MAX_SIZE);
-        _outScores = calloc<Float>(OBJ_NUMB_MAX_SIZE);
-        _outBoxes = calloc<Float>(OBJ_NUMB_MAX_SIZE * 4);
+        _outIds = calloc<Int32>(objNumbMaxSize);
+        _outScores = calloc<Float>(objNumbMaxSize);
+        _outBoxes = calloc<Float>(objNumbMaxSize * 4);
       }
 
       // Run inference

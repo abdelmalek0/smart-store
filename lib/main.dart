@@ -9,14 +9,14 @@ import 'package:window_manager/window_manager.dart';
 import 'package:smart_store_linux/ui/theme/app_theme.dart';
 import 'package:smart_store_linux/ui/providers/app_provider.dart';
 import 'package:smart_store_linux/ui/providers/rtsp_stream_provider.dart';
-import 'package:smart_store_linux/backend/services/linux_resource_monitor.dart';
+import 'package:smart_store_linux/backend/services/resource_monitor/linux/linux_resource_monitor.dart';
 import 'package:smart_store_linux/ui/providers/model_provider.dart';
 import 'package:smart_store_linux/ai/inference/service/inference_service.dart';
 import 'package:smart_store_linux/ui/providers/inference_provider.dart';
 import 'package:smart_store_linux/ui/screens/main_layout.dart';
 import 'package:smart_store_linux/backend/streaming/pipeline/stream_manager.dart';
 import 'package:smart_store_linux/backend/services/config_service.dart';
-import 'package:smart_store_linux/backend/services/android_resource_monitor.dart'; // Add Android Monitor
+import 'package:smart_store_linux/backend/services/resource_monitor/android/android_resource_monitor.dart'; // Add Android Monitor
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();

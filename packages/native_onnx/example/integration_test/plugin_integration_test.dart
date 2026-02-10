@@ -14,11 +14,10 @@ import 'package:native_onnx/native_onnx.dart';
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('getPlatformVersion test', (WidgetTester tester) async {
-    final NativeOnnx plugin = NativeOnnx();
-    final String? version = await plugin.getPlatformVersion();
-    // The version string depends on the host platform running the test, so
-    // just assert that some non-empty string is returned.
-    expect(version?.isNotEmpty, true);
+  testWidgets('init test', (WidgetTester tester) async {
+    final NativeInferenceService plugin = NativeInferenceService();
+    await plugin.init();
+    // Since we can't easily check internal state without accessors,
+    // we just verify it doesn't throw.
   });
 }

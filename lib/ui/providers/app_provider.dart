@@ -3,7 +3,7 @@ import 'package:flutter/foundation.dart';
 class AppProvider extends ChangeNotifier {
   bool _isEngineRunning = false;
   bool _isSidebarExpanded = false;
-  Map<String, double> _stats = {'cpu': 0.0, 'gpu': 0.0, 'ram': 0.0};
+  final Map<String, double> _stats = {'cpu': 0.0, 'gpu': 0.0, 'ram': 0.0};
 
   String _cpuName = "Detecting...";
   String _gpuName = "Detecting...";

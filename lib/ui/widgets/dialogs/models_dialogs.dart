@@ -92,23 +92,28 @@ void showAddModelDialog(BuildContext context) {
                     if (path != null && path.isNotEmpty) {
                       final file = File(path);
                       if (!path.toLowerCase().endsWith('.rknn')) {
+                        if (!context.mounted) return;
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
                             content: Text('File must have .rknn extension'),
                             backgroundColor: AppTheme.destructive,
                           ),
                         );
-                      } else if (!await file.exists()) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('File not found at path'),
-                            backgroundColor: AppTheme.destructive,
-                          ),
-                        );
                       } else {
-                        setState(() {
-                          selectedPath = path;
-                        });
+                        final exists = await file.exists();
+                        if (!exists) {
+                          if (!context.mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('File not found at path'),
+                              backgroundColor: AppTheme.destructive,
+                            ),
+                          );
+                        } else {
+                          setState(() {
+                            selectedPath = path;
+                          });
+                        }
                       }
                     }
                   } else {
@@ -355,6 +360,7 @@ Future<void> _pickAndUploadLabels(
     );
 
     if (path != null && path.isNotEmpty) {
+      if (!context.mounted) return;
       await _processLabelsFile(context, path, model, provider);
     }
   } else {
@@ -365,6 +371,7 @@ Future<void> _pickAndUploadLabels(
         allowedExtensions: ['txt'],
       );
       if (result != null && result.files.single.path != null) {
+        if (!context.mounted) return;
         await _processLabelsFile(
           context,
           result.files.single.path!,

@@ -11,7 +11,7 @@ import 'dart:isolate';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:smart_store_linux/backend/video/capture/video_capture/video_capture.dart';
-import 'package:smart_store_linux/backend/video/capture/video_capture/linux_video_capture.dart';
+import 'package:smart_store_linux/backend/video/capture/video_capture/linux/linux_video_capture.dart';
 import 'package:smart_store_linux/backend/streaming/isolates/isolate_params.dart';
 
 /// Isolate entry point for video capture

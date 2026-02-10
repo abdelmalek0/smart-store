@@ -13,7 +13,7 @@ import 'package:flutter/foundation.dart';
 import 'package:native_onnx/native_onnx.dart';
 import 'package:smart_store_linux/ai/post_processing/yolo_processor.dart';
 
-import 'video_capture.dart';
+import '../video_capture.dart';
 
 /// Linux-specific video capture implementation
 ///

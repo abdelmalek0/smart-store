@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
-import '../../ui/providers/app_provider.dart';
-import 'ffmpeg_video_service.dart';
+import 'package:smart_store_linux/ui/providers/app_provider.dart';
+import 'package:smart_store_linux/backend/services/video/ffmpeg_video_service.dart';
 
 class AndroidResourceMonitor {
   final AppProvider _provider;

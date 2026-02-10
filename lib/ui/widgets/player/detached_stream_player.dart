@@ -12,7 +12,7 @@ import 'package:smart_store_linux/backend/services/config_service.dart';
 import 'package:smart_store_linux/ui/providers/model_provider.dart';
 import 'package:smart_store_linux/ui/widgets/player/detection_overlay_painter.dart';
 import 'package:smart_store_linux/ui/widgets/player/stats_overlay.dart';
-import 'package:smart_store_linux/backend/services/ffmpeg_video_service.dart'; // Strict Sync
+import 'package:smart_store_linux/backend/services/video/ffmpeg_video_service.dart'; // Strict Sync
 
 class DetachedStreamPlayer extends StatefulWidget {
   final String url;
@@ -62,7 +62,7 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
   // Track frames for averaging FPS
   // Stabilized FPS - Rolling Window (last 30 frames)
   final List<int> _frameTimestamps = [];
-  static const int FPS_WINDOW_SIZE = 30;
+  static const int fpsWindowSize = 10;
   double _fps = 0.0;
 
   @override
@@ -308,7 +308,7 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
               // FPS Calc
               final now = DateTime.now().millisecondsSinceEpoch;
               _frameTimestamps.add(now);
-              if (_frameTimestamps.length > FPS_WINDOW_SIZE) {
+              if (_frameTimestamps.length > fpsWindowSize) {
                 _frameTimestamps.removeAt(0);
               }
               if (_frameTimestamps.length >= 2) {
@@ -375,7 +375,7 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
             _frameTimestamps.add(now);
 
             // Keep only the last N timestamps
-            if (_frameTimestamps.length > FPS_WINDOW_SIZE) {
+            if (_frameTimestamps.length > fpsWindowSize) {
               _frameTimestamps.removeAt(0); // Remove oldest
             }
 

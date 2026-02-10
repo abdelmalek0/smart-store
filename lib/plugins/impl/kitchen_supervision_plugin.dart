@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:smart_store_linux/core/models/frames.dart';
 import 'package:smart_store_linux/plugins/base/plugin_base.dart';
+import 'package:flutter/foundation.dart';
 
 /// Kitchen Supervision Plugin
 /// Detects 'no-gloves' class (index 4) for violations and 'gloves' class (index 0) for display.
@@ -21,7 +22,7 @@ class KitchenSupervisionPlugin extends SmartStorePlugin {
     }
 
     // DEBUG: Log initialization
-    print(
+    debugPrint(
       "KitchenSupervisionPlugin [$streamId]: Initialized. Model Path: $_modelPath, Hand Class ID: $_handClassId",
     );
   }
@@ -77,6 +78,7 @@ class KitchenSupervisionPlugin extends SmartStorePlugin {
       } else {
         final duration = now.difference(_handDetectionStartTime!);
         if (duration.inSeconds >= 5 && !_eventFiredForThisSession) {
+          debugPrint("Kitchen Violation: Bare hands detected!");
           emitEvent('Kitchen Violation', {
             'msg': 'Bare hands detected for ${duration.inSeconds} seconds!',
             'duration': duration.inSeconds,
@@ -104,7 +106,7 @@ class KitchenSupervisionPlugin extends SmartStorePlugin {
 
       // DEBUG: Log detections similar to PeopleCountingPlugin
       if (detections.isNotEmpty) {
-        print(
+        debugPrint(
           "KitchenSupervisionPlugin [$streamId]: Frame processed. Total Detections: ${detections.length}, Hands: ${handDetections.length}, Hand Detected: $handDetected",
         );
       }

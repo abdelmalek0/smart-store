@@ -45,9 +45,9 @@ class RknnInferenceBackend extends InferenceBackend {
 
     // Allocate output buffers once (Max objects = OBJ_NUMB_MAX_SIZE)
     if (_outIds == null) {
-      _outIds = calloc<Int32>(OBJ_NUMB_MAX_SIZE);
-      _outScores = calloc<Float>(OBJ_NUMB_MAX_SIZE);
-      _outBoxes = calloc<Float>(OBJ_NUMB_MAX_SIZE * 4);
+      _outIds = calloc<Int32>(objNumbMaxSize);
+      _outScores = calloc<Float>(objNumbMaxSize);
+      _outBoxes = calloc<Float>(objNumbMaxSize * 4);
     }
 
     return 1; // Return dummy ID

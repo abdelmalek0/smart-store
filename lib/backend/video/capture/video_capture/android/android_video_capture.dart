@@ -8,9 +8,9 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
-import 'package:smart_store_linux/backend/services/ffmpeg_video_service.dart';
+import 'package:smart_store_linux/backend/services/video/ffmpeg_video_service.dart';
 
-import 'video_capture.dart';
+import '../video_capture.dart';
 
 /// Android-specific video capture implementation
 ///

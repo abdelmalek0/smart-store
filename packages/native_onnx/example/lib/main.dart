@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:native_onnx/src/native_inference_service.dart';
 import 'dart:async';
-
-import 'package:flutter/services.dart';
-import 'package:native_onnx/native_onnx.dart';
 
 void main() {
   runApp(const MyApp());
@@ -17,7 +15,7 @@ class MyApp extends StatefulWidget {
 
 class _MyAppState extends State<MyApp> {
   String _platformVersion = 'Unknown';
-  final _nativeOnnxPlugin = NativeOnnx();
+  final _nativeOnnxPlugin = NativeInferenceService();
 
   @override
   void initState() {
@@ -27,23 +25,18 @@ class _MyAppState extends State<MyApp> {
 
   // Platform messages are asynchronous, so we initialize in an async method.
   Future<void> initPlatformState() async {
-    String platformVersion;
-    // Platform messages may fail, so we use a try/catch PlatformException.
-    // We also handle the message potentially returning null.
+    bool isInitialized = false;
     try {
-      platformVersion =
-          await _nativeOnnxPlugin.getPlatformVersion() ?? 'Unknown platform version';
-    } on PlatformException {
-      platformVersion = 'Failed to get platform version.';
+      await _nativeOnnxPlugin.init();
+      isInitialized = true;
+    } catch (e) {
+      debugPrint("Init failed: $e");
     }
 
-    // If the widget was removed from the tree while the asynchronous platform
-    // message was in flight, we want to discard the reply rather than calling
-    // setState to update our non-existent appearance.
     if (!mounted) return;
 
     setState(() {
-      _platformVersion = platformVersion;
+      _platformVersion = isInitialized ? 'Initialized' : 'Failed to initialize';
     });
   }
 

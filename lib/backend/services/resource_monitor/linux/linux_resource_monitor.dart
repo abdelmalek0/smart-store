@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
-import '../../ui/providers/app_provider.dart';
+import 'package:smart_store_linux/ui/providers/app_provider.dart';
 
 class LinuxResourceMonitor {
   final AppProvider _provider;

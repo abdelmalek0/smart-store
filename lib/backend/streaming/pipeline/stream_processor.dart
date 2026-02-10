@@ -10,7 +10,7 @@ import 'package:smart_store_linux/core/models/rtsp_stream.dart';
 import 'package:smart_store_linux/ai/inference/service/inference_service.dart';
 import 'package:smart_store_linux/backend/streaming/isolates/capture_isolate.dart';
 import 'package:smart_store_linux/backend/streaming/isolates/isolate_params.dart';
-import 'package:smart_store_linux/backend/services/ffmpeg_video_service.dart';
+import 'package:smart_store_linux/backend/services/video/ffmpeg_video_service.dart';
 import 'package:smart_store_linux/plugins/manager/plugin_manager.dart'; // Add PluginManager
 import 'package:smart_store_linux/backend/services/config_service.dart'; // Add ConfigService
 import 'package:smart_store_linux/core/registry/plugin_registry.dart';
@@ -35,8 +35,8 @@ class StreamProcessor {
   bool _isFrozen = false;
 
   // Queue Configuration - Using centralized Constants for consistency
-  static const int INFERENCE_QUEUE_MAX_SIZE = Constants.inferenceQueueMaxSize;
-  static const int DISPLAY_QUEUE_MAX_SIZE = Constants.displayQueueMaxSize;
+  static const int inferenceQueueMaxSize = 5;
+  static const int displayQueueMaxSize = Constants.displayQueueMaxSize;
 
   // Plugin Manager (replaces Inference and Display Queue logic somewhat)
   PluginManager? _pluginManager;
@@ -155,7 +155,7 @@ class StreamProcessor {
         if (_pendingPluginFrames > 0) _pendingPluginFrames--;
 
         // Add to DisplayQueue (Backpressure logic)
-        if (_displayQueue.length >= DISPLAY_QUEUE_MAX_SIZE) {
+        if (_displayQueue.length >= displayQueueMaxSize) {
           _displayQueue.removeFirst();
         }
         _displayQueue.add(processedFrame);
@@ -232,7 +232,7 @@ class StreamProcessor {
                 postprocessEndMs: now,
               );
 
-              if (_displayQueue.length >= DISPLAY_QUEUE_MAX_SIZE) {
+              if (_displayQueue.length >= displayQueueMaxSize) {
                 _displayQueue.removeFirst();
               }
               _displayQueue.add(processed);
@@ -248,7 +248,7 @@ class StreamProcessor {
             } else if (msgType == 'processed_frame') {
               // Optimized Linux Path: Frame + Inference received together
               // ... existing logic ...
-              if (_displayQueue.length >= DISPLAY_QUEUE_MAX_SIZE) {
+              if (_displayQueue.length >= displayQueueMaxSize) {
                 return; // Backpressure
               }
 
@@ -338,7 +338,7 @@ class StreamProcessor {
                 _frameHeight = frame.height;
               }
 
-              if (_displayQueue.length < DISPLAY_QUEUE_MAX_SIZE) {
+              if (_displayQueue.length < displayQueueMaxSize) {
                 _displayQueue.add(processed);
               }
             } else {
