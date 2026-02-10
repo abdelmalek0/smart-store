@@ -1,6 +1,11 @@
 cmake_minimum_required(VERSION 3.13)
 project(runner LANGUAGES CXX)
 
+# Suppress FindCUDA deprecation warning (we use it via OpenCV)
+if(POLICY CMP0146)
+  cmake_policy(SET CMP0146 OLD)
+endif()
+
 # Define the application target. To change its name, change BINARY_NAME in the
 # top-level CMakeLists.txt, not the value here, or `flutter run` will no longer
 # work.

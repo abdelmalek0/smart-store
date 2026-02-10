@@ -1,13 +1,16 @@
 
 cmake_minimum_required(VERSION 3.10)
 
-# Suppress FindCUDA deprecation warning (we use it via OpenCV)
-if(POLICY CMP0146)
-  cmake_policy(SET CMP0146 OLD)
-endif()
+
 
 set(PROJECT_NAME "native_onnx")
 project(${PROJECT_NAME} LANGUAGES CXX)
+
+# Suppress FindCUDA deprecation warning (we use it via OpenCV)
+if(POLICY CMP0146)
+  cmake_policy(SET CMP0146 OLD)
+  set(CMAKE_POLICY_DEFAULT_CMP0146 OLD)
+endif()
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
