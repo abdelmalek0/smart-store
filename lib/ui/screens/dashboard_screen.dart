@@ -5,7 +5,7 @@ import 'package:smart_store_linux/ui/providers/rtsp_stream_provider.dart';
 import 'package:smart_store_linux/ui/widgets/modern_widgets.dart';
 import 'package:smart_store_linux/ui/providers/inference_provider.dart';
 import 'package:smart_store_linux/ui/providers/model_provider.dart';
-import 'package:smart_store_linux/ui/viewmodels/dashboard_viewmodel.dart';
+import 'package:smart_store_linux/ui/viewModels/dashboard_viewmodel.dart';
 
 class DashboardScreen extends StatelessWidget {
   const DashboardScreen({super.key});

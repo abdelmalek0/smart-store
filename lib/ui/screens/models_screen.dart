@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:smart_store_linux/ui/theme/app_theme.dart';
+import 'package:smart_store_linux/ui/utils/theme/app_theme.dart';
 import 'package:smart_store_linux/ui/providers/model_provider.dart';
 import 'package:smart_store_linux/ui/widgets/modern_widgets.dart';
 import 'package:smart_store_linux/core/models/model_info.dart';
 import 'package:smart_store_linux/ui/widgets/dialogs/models_dialogs.dart';
-import 'package:smart_store_linux/ui/viewmodels/models_viewmodel.dart';
+import 'package:smart_store_linux/ui/viewModels/models_viewmodel.dart';
 
 class ModelsScreen extends StatelessWidget {
   const ModelsScreen({super.key});

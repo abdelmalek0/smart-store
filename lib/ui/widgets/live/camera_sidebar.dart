@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:smart_store_linux/core/models/rtsp_stream.dart';
-import 'package:smart_store_linux/backend/streaming/pipeline/stream_manager.dart';
+import 'package:smart_store_linux/core/streaming/models/rtsp_stream.dart';
+import 'package:smart_store_linux/core/engine/pipeline/stream_manager.dart';
 
 class CameraSidebar extends StatefulWidget {
   final List<RTSPStream> streams;

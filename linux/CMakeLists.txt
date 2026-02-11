@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.13)
 project(runner LANGUAGES CXX)
 
 # The name of the executable created for the application.
-set(BINARY_NAME "smart_store_linux")
+set(BINARY_NAME "smart_store")
 set(APPLICATION_ID "com.example.smart_store_linux")
 
 # Explicitly opt in to modern CMake behaviors.

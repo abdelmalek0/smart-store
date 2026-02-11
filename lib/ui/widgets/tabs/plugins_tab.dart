@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:smart_store_linux/backend/services/config_service.dart';
+import 'package:smart_store_linux/core/config/config_service.dart';
 import 'package:smart_store_linux/core/models/plugin_info.dart';
-import 'package:smart_store_linux/core/registry/plugin_registry.dart';
+import 'package:smart_store_linux/core/plugins/registry/plugin_registry.dart';
 import 'package:smart_store_linux/ui/providers/model_provider.dart';
 import 'package:smart_store_linux/ui/widgets/modern_widgets.dart';
-import 'package:smart_store_linux/ui/viewmodels/plugins_viewmodel.dart';
+import 'package:smart_store_linux/ui/viewModels/plugins_viewmodel.dart';
 
 class PluginsTab extends StatefulWidget {
   final Function(String, String) onModelChanged;

@@ -1,5 +1,5 @@
 import 'dart:io';
-import 'package:smart_store_linux/backend/streaming/pipeline/stream_processor.dart';
+import 'package:smart_store_linux/core/engine/pipeline/stream_processor.dart';
 
 import 'linux/linux_stream_sync_manager.dart';
 import 'android/android_stream_sync_manager.dart';

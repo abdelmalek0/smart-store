@@ -1,7 +1,7 @@
 import 'package:flutter/foundation.dart';
-import 'package:smart_store_linux/backend/services/texture_service.dart';
-import 'package:smart_store_linux/backend/services/video/ffmpeg_video_service.dart';
-import 'package:smart_store_linux/backend/streaming/pipeline/stream_processor.dart';
+import 'package:smart_store_linux/core/rendering/texture_service.dart';
+import 'package:smart_store_linux/core/streaming/services/ffmpeg_video_service.dart';
+import 'package:smart_store_linux/core/engine/pipeline/stream_processor.dart';
 import '../stream_sync_manager.dart';
 
 /// Linux implementation of StreamSyncManager

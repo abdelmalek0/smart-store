@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:smart_store_linux/ui/theme/app_theme.dart';
+import 'package:smart_store_linux/ui/utils/theme/app_theme.dart';
 import 'package:smart_store_linux/ui/providers/rtsp_stream_provider.dart';
 import 'package:smart_store_linux/ui/widgets/modern_widgets.dart';
-import 'package:smart_store_linux/ui/viewmodels/streams_viewmodel.dart';
+import 'package:smart_store_linux/ui/viewModels/streams_viewmodel.dart';
 
 class StreamsScreen extends StatelessWidget {
   const StreamsScreen({super.key});

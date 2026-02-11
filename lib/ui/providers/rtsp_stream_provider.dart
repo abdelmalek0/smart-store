@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
-import 'package:smart_store_linux/backend/services/persistence_service.dart';
-import 'package:smart_store_linux/core/models/rtsp_stream.dart';
+import 'package:smart_store_linux/data/services/persistence_service.dart';
+import 'package:smart_store_linux/core/streaming/models/rtsp_stream.dart';
 
 class RTSPStreamProvider extends ChangeNotifier {
   final PersistenceService _persistence = PersistenceService();

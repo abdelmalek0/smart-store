@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import 'package:smart_store_linux/backend/services/config_service.dart';
+import 'package:smart_store_linux/core/config/config_service.dart';
 import 'package:smart_store_linux/ui/providers/model_provider.dart';
 
 class InferenceProvider extends ChangeNotifier {

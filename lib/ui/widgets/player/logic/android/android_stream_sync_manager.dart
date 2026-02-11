@@ -1,4 +1,4 @@
-import 'package:smart_store_linux/backend/streaming/pipeline/stream_processor.dart';
+import 'package:smart_store_linux/core/engine/pipeline/stream_processor.dart';
 import '../stream_sync_manager.dart';
 
 /// Android implementation of StreamSyncManager

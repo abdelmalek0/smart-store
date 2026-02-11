@@ -1,5 +1,5 @@
 name: smart_store_linux
-description: FFmpeg based AI counter
+description: AI-powered video analytics and store monitoring system.
 publish_to: 'none'
 version: 1.0.0+1
 environment:

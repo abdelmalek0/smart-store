@@ -1,14 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:smart_store_linux/ui/theme/app_theme.dart';
+import 'package:smart_store_linux/ui/utils/theme/app_theme.dart';
 import 'package:smart_store_linux/ui/providers/rtsp_stream_provider.dart';
 import 'package:smart_store_linux/ui/providers/model_provider.dart';
 import 'package:smart_store_linux/ui/providers/inference_provider.dart';
 import 'package:smart_store_linux/ui/widgets/modern_widgets.dart';
 import 'package:smart_store_linux/ui/widgets/player/detached_stream_player.dart';
-import 'package:smart_store_linux/backend/streaming/pipeline/stream_manager.dart';
+import 'package:smart_store_linux/core/engine/pipeline/stream_manager.dart';
 import 'package:smart_store_linux/ui/widgets/live/camera_sidebar.dart';
-import 'package:smart_store_linux/ui/viewmodels/playback_viewmodel.dart';
+import 'package:smart_store_linux/ui/viewModels/playback_viewmodel.dart';
 
 class PlaybackScreen extends StatefulWidget {
   const PlaybackScreen({super.key});

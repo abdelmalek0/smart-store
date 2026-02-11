@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:smart_store_linux/ui/theme/app_theme.dart';
+import 'package:smart_store_linux/ui/utils/theme/app_theme.dart';
 import 'package:smart_store_linux/ui/providers/app_provider.dart';
 import 'package:smart_store_linux/ui/widgets/sidebar.dart';
 import 'package:smart_store_linux/ui/screens/dashboard_screen.dart';

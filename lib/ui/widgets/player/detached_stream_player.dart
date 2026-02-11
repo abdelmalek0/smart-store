@@ -3,10 +3,10 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:smart_store_linux/ui/theme/app_theme.dart';
-import 'package:smart_store_linux/backend/streaming/pipeline/stream_manager.dart';
+import 'package:smart_store_linux/ui/utils/theme/app_theme.dart';
+import 'package:smart_store_linux/core/engine/pipeline/stream_manager.dart';
 import 'package:smart_store_linux/core/models/frames.dart';
-import 'package:smart_store_linux/backend/services/config_service.dart';
+import 'package:smart_store_linux/core/config/config_service.dart';
 import 'package:smart_store_linux/ui/providers/model_provider.dart';
 import 'package:smart_store_linux/ui/widgets/player/detection_overlay_painter.dart';
 import 'package:smart_store_linux/ui/widgets/player/stats_overlay.dart';

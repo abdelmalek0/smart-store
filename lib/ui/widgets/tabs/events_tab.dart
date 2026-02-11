@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:smart_store_linux/backend/streaming/pipeline/stream_manager.dart';
-import 'package:smart_store_linux/ui/viewmodels/events_viewmodel.dart';
+import 'package:smart_store_linux/core/engine/pipeline/stream_manager.dart';
+import 'package:smart_store_linux/ui/viewModels/events_viewmodel.dart';
+import 'package:smart_store_linux/core/events/events.dart';
 
 class EventsTab extends StatefulWidget {
   const EventsTab({super.key});
@@ -71,7 +72,7 @@ class _EventsTabState extends State<EventsTab> {
                     itemBuilder: (context, index) {
                       final event = _vm.events[index];
                       // Resolve Camera Name from StreamManager
-                      final streamId = event['streamId']?.toString() ?? '';
+                      final streamId = event.streamId;
                       final processor = StreamProcessManager.instance
                           .getProcessor(streamId);
                       final streamName = processor?.stream.name ?? streamId;
@@ -137,7 +138,7 @@ class _EventsTabState extends State<EventsTab> {
     }
 
     _vm.addEvent({
-      'eventType': type,
+      'eventType': type, // This will be parsed as severity by ViewModel
       'streamId': 'Camera ${now % 4 + 1}',
       'timestamp': now,
       'data': {'msg': msg},
@@ -146,7 +147,7 @@ class _EventsTabState extends State<EventsTab> {
 }
 
 class EventCard extends StatelessWidget {
-  final Map<String, dynamic> event;
+  final AppEvent event;
   final String streamName;
 
   const EventCard({
@@ -157,11 +158,20 @@ class EventCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final type = (event['eventType'] ?? 'INFO').toString().toUpperCase();
-    final timestamp = event['timestamp'] as int? ?? 0;
+    final type = event.type.toUpperCase();
+    final severity = event.severity;
+    final timestamp = event.timestamp;
 
-    // msg might be complex or simple string
-    final rawMsg = event['data']?['msg']?.toString() ?? 'No details';
+    String rawMsg = 'No details';
+    if (event is SystemEvent) {
+      rawMsg = (event as SystemEvent).message;
+    } else if (event is DetectionEvent) {
+      final e = event as DetectionEvent;
+      rawMsg = "${e.label} caused alert";
+      if (e.metadata.containsKey('msg')) {
+        rawMsg = e.metadata['msg'].toString();
+      }
+    }
 
     // Split title and description if newline exists
     String title = rawMsg;
@@ -173,8 +183,8 @@ class EventCard extends StatelessWidget {
       description = parts.sublist(1).join('\n');
     }
 
-    final severityColor = _getSeverityColor(type);
-    final iconData = _getSeverityIcon(type);
+    final severityColor = _getSeverityColor(severity);
+    final iconData = _getSeverityIcon(severity);
     final dateTimeString = _formatDateTime(timestamp);
 
     return Container(
@@ -275,16 +285,26 @@ class EventCard extends StatelessWidget {
     );
   }
 
-  Color _getSeverityColor(String type) {
-    if (type.contains('CRITICAL')) return const Color(0xFFEF4444); // Red-500
-    if (type.contains('WARNING')) return const Color(0xFFEAB308); // Yellow-500
-    return const Color(0xFF3B82F6); // Blue-500 (Info)
+  Color _getSeverityColor(EventSeverity severity) {
+    switch (severity) {
+      case EventSeverity.critical:
+        return const Color(0xFFEF4444); // Red-500
+      case EventSeverity.warning:
+        return const Color(0xFFEAB308); // Yellow-500
+      case EventSeverity.info:
+        return const Color(0xFF3B82F6); // Blue-500 (Info)
+    }
   }
 
-  IconData _getSeverityIcon(String type) {
-    if (type.contains('CRITICAL')) return Icons.warning_amber_rounded;
-    if (type.contains('WARNING')) return Icons.info_outline;
-    return Icons.notifications_active_outlined;
+  IconData _getSeverityIcon(EventSeverity severity) {
+    switch (severity) {
+      case EventSeverity.critical:
+        return Icons.warning_amber_rounded;
+      case EventSeverity.warning:
+        return Icons.info_outline;
+      case EventSeverity.info:
+        return Icons.notifications_active_outlined;
+    }
   }
 
   String _formatDateTime(int timestamp) {

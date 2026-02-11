@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:smart_store_linux/ui/theme/app_theme.dart';
+import 'package:smart_store_linux/ui/utils/theme/app_theme.dart';
 
 class Sidebar extends StatefulWidget {
   final int selectedIndex;
