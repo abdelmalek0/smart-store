@@ -44,7 +44,7 @@ void main() async {
     await NativeInferenceService().init();
 
     WindowOptions windowOptions = const WindowOptions(
-      size: Size(1280, 720),
+      fullScreen: true,
       center: true,
       backgroundColor: Colors.transparent,
       skipTaskbar: false,

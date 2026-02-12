@@ -11,8 +11,8 @@ import 'package:smart_store_linux/ui/providers/model_provider.dart';
 import 'package:smart_store_linux/ui/widgets/player/detection_overlay_painter.dart';
 import 'package:smart_store_linux/ui/widgets/player/stats_overlay.dart';
 
-import 'logic/stream_sync_manager.dart';
-import 'logic/stream_stats_tracker.dart';
+import 'package:smart_store_linux/core/streaming/sync/stream_sync_manager.dart';
+import 'package:smart_store_linux/core/resources/stream_stats_tracker.dart';
 
 class DetachedStreamPlayer extends StatefulWidget {
   final String url;
