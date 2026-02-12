@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:smart_store_linux/ui/providers/app_provider.dart';
-import 'package:smart_store_linux/core/streaming/services/ffmpeg_video_service.dart';
 
 class AndroidResourceMonitor {
+  static const MethodChannel _channel = MethodChannel('ffmpeg_video');
+
   final AppProvider _provider;
   Timer? _timer;
 
@@ -21,8 +23,7 @@ class AndroidResourceMonitor {
 
   Future<void> _fetchStats() async {
     try {
-      // Call native Android plugin to get stats
-      final stats = await FFmpegVideoService.getSystemStats();
+      final stats = await _getSystemStats();
 
       if (stats != null) {
         // Map Native stats to Provider stats
@@ -47,6 +48,25 @@ class AndroidResourceMonitor {
       }
     } catch (e) {
       debugPrint("Error fetching Android stats: $e");
+    }
+  }
+
+  /// Fetch system stats from the native Android plugin via MethodChannel.
+  Future<Map<String, double>?> _getSystemStats() async {
+    try {
+      final result = await _channel.invokeMethod<Map>('getSystemStats');
+      if (result != null) {
+        final stats = <String, double>{};
+        result.forEach((key, value) {
+          if (key is String && value is num) {
+            stats[key] = value.toDouble();
+          }
+        });
+        return stats;
+      }
+      return null;
+    } catch (e) {
+      return null;
     }
   }
 

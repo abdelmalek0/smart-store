@@ -4,7 +4,7 @@ import 'package:smart_store_linux/core/models/plugin_info.dart';
 /// Central registry of all available plugins.
 ///
 /// Single source of truth — replaces hardcoded lists in
-/// [PluginsTab], [ConfigurationScreen], and [StreamProcessor].
+/// [PluginsTab], [ConfigurationScreen], and [StreamPipeline].
 class PluginRegistry {
   PluginRegistry._();
 

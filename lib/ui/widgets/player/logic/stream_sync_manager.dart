@@ -1,5 +1,5 @@
 import 'dart:io';
-import 'package:smart_store_linux/core/engine/pipeline/stream_processor.dart';
+import 'package:smart_store_linux/core/engine/stream_pipeline.dart';
 
 import 'linux/linux_stream_sync_manager.dart';
 import 'android/android_stream_sync_manager.dart';
@@ -28,17 +28,17 @@ abstract class StreamSyncManager {
   /// Initialize any platform-specific resources (e.g. create Linux texture).
   Future<void> initialize(int width, int height);
 
-  /// Update state based on processor info (e.g. Android texture ID arriving late).
+  /// Update state based on pipeline info (e.g. Android texture ID arriving late).
   /// Returns `true` if state changed.
-  bool updateTextureFromProcessor(StreamProcessor processor);
+  bool updateTextureFromProcessor(StreamPipeline processor);
 
   /// Maintain ongoing connection (e.g. Linux stream-to-texture binding).
-  Future<void> maintainConnection(StreamProcessor processor);
+  Future<void> maintainConnection(StreamPipeline processor);
 
   /// Strictly synchronize frame display.
   /// Returns `true` if frame should be rendered (or was rendered to texture).
   /// Returns `false` if frame dropped/missing in native buffer.
-  Future<bool> showFrame(StreamProcessor processor, int timestamp);
+  Future<bool> showFrame(StreamPipeline processor, int timestamp);
 
   /// Dispose resources.
   void dispose();

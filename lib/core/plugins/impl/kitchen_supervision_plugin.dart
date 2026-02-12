@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'package:smart_store_linux/core/models/frames.dart';
-import 'package:smart_store_linux/core/plugins/base/plugin_base.dart';
+import 'package:smart_store_linux/core/plugins/plugin_base.dart';
 import 'package:flutter/foundation.dart';
 import 'package:smart_store_linux/core/events/base/event_severity.dart';
 

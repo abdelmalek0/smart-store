@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:smart_store_linux/core/streaming/models/rtsp_stream.dart';
-import 'package:smart_store_linux/core/engine/pipeline/stream_manager.dart';
+import 'package:smart_store_linux/core/engine/stream_engine.dart';
 
 class CameraSidebar extends StatefulWidget {
   final List<RTSPStream> streams;
   final String? selectedStreamId;
   final Function(String) onStreamSelected;
   final bool isOpen;
-  final StreamProcessManager? processManager;
+  final StreamEngine? processManager;
 
   const CameraSidebar({
     super.key,
@@ -148,7 +148,7 @@ class _CameraSidebarState extends State<CameraSidebar> {
 
   Widget _buildCameraItem(RTSPStream stream) {
     final isSelected = widget.selectedStreamId == stream.id;
-    final isRunning = widget.processManager?.getProcessor(stream.id) != null;
+    final isRunning = widget.processManager?.getPipeline(stream.id) != null;
 
     // Status dot color
     final statusColor = isRunning

@@ -4,7 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:smart_store_linux/core/streaming/models/rtsp_stream.dart';
 import 'package:smart_store_linux/core/config/config_service.dart';
 import 'package:smart_store_linux/ai/service/inference_service.dart';
-import 'package:smart_store_linux/core/engine/pipeline/stream_processor.dart';
+import 'package:smart_store_linux/core/engine/stream_pipeline.dart';
 
 // ===========================================================================
 // SMART STORE STREAM PROCESSING ARCHITECTURE
@@ -36,26 +36,24 @@ import 'package:smart_store_linux/core/engine/pipeline/stream_processor.dart';
 //
 // ===========================================================================
 
-/// Manager for all stream processors
+/// The main engine that manages all stream pipelines.
 ///
 /// Responsibilities:
-/// - Creating and managing StreamProcessor instances
+/// - Creating and managing StreamPipeline instances
 /// - Starting/stopping inference for all streams
 /// - Coordinating with InferenceService and ConfigService
-class StreamProcessManager extends ChangeNotifier {
-  static final StreamProcessManager _instance =
-      StreamProcessManager._internal();
-  factory StreamProcessManager() => _instance;
-  static StreamProcessManager get instance => _instance;
+class StreamEngine extends ChangeNotifier {
+  static final StreamEngine _instance = StreamEngine._internal();
+  factory StreamEngine() => _instance;
+  static StreamEngine get instance => _instance;
 
-  StreamProcessManager._internal();
+  StreamEngine._internal();
 
-  final Map<String, StreamProcessor> _processors = {};
+  final Map<String, StreamPipeline> _pipelines = {};
 
-  Map<String, StreamProcessor> get processors =>
-      UnmodifiableMapView(_processors);
+  Map<String, StreamPipeline> get pipelines => UnmodifiableMapView(_pipelines);
 
-  bool get isRunning => _processors.values.any((p) => !p.isFrozen);
+  bool get isRunning => _pipelines.values.any((p) => !p.isFrozen);
 
   /// Start all streams with their assigned models
   void startAll(
@@ -64,13 +62,13 @@ class StreamProcessManager extends ChangeNotifier {
     streamModelMap, // Keep for backward compat or initial overrides
     List<dynamic> models,
   ) async {
-    debugPrint("StreamManager: Starting all streams...");
+    debugPrint("StreamEngine: Starting all streams...");
 
-    // Clean up any frozen processors first for clean restart
-    if (_processors.isNotEmpty) {
-      final hasFrozen = _processors.values.any((p) => p.isFrozen);
+    // Clean up any frozen pipelines first for clean restart
+    if (_pipelines.isNotEmpty) {
+      final hasFrozen = _pipelines.values.any((p) => p.isFrozen);
       if (hasFrozen) {
-        debugPrint("Clearing frozen processors before restart...");
+        debugPrint("Clearing frozen pipelines before restart...");
         clearAll();
         // Wait a bit for cleanup to complete
         await Future.delayed(const Duration(milliseconds: 500));
@@ -85,20 +83,20 @@ class StreamProcessManager extends ChangeNotifier {
 
     for (var stream in streams) {
       // Skip if already exists
-      if (_processors.containsKey(stream.id)) {
-        debugPrint("[SKIP] Processor for ${stream.id} already exists");
+      if (_pipelines.containsKey(stream.id)) {
+        debugPrint("[SKIP] Pipeline for ${stream.id} already exists");
         continue;
       }
 
-      // StreamProcessor will load its own config and model
-      final processor = StreamProcessor(stream: stream);
-      _processors[stream.id] = processor;
+      // StreamPipeline will load its own config and model
+      final pipeline = StreamPipeline(stream: stream);
+      _pipelines[stream.id] = pipeline;
 
       // CRITICAL: Log stream initialization
       debugPrint("[INIT] Stream: ${stream.id}");
 
       // Await initialization to prevent race conditions/crashes
-      await processor.initialize();
+      await pipeline.initialize();
       notifyListeners();
 
       // Stagger startup
@@ -109,41 +107,41 @@ class StreamProcessManager extends ChangeNotifier {
   /// Update the model assigned to a stream
   Future<void> updateStreamModel(String streamId, String? modelPath) async {
     await ConfigService.instance.setModelForStream(streamId, modelPath);
-    // Logic to restart specific stream processor?
+    // Logic to restart specific stream pipeline?
     // For now, user has to Stop/Start engine.
     // But we can support hot-swap if we wanted.
   }
 
   /// Stop all inference and release all resources
   Future<void> stopAll() async {
-    debugPrint("StreamManager: Stopping engine (full shutdown)...");
+    debugPrint("StreamEngine: Stopping engine (full shutdown)...");
 
-    // Full destruction of all processors and resources
+    // Full destruction of all pipelines and resources
     await clearAll();
 
-    debugPrint("StreamManager: Engine stopped and resources released");
+    debugPrint("StreamEngine: Engine stopped and resources released");
     notifyListeners();
   }
 
   /// Clear all streams and stop all processing
   Future<void> clearAll() async {
-    debugPrint("StreamManager: Clearing all streams and inference...");
+    debugPrint("StreamEngine: Clearing all streams and inference...");
 
-    // Dispose all processors
-    for (var p in _processors.values) {
+    // Dispose all pipelines
+    for (var p in _pipelines.values) {
       await p.dispose();
     }
-    _processors.clear();
+    _pipelines.clear();
 
     // Release inference service
     InferenceService.instance.release();
 
-    debugPrint("StreamManager: All resources cleared");
+    debugPrint("StreamEngine: All resources cleared");
     notifyListeners();
   }
 
-  /// Get a specific processor by stream ID
-  StreamProcessor? getProcessor(String streamId) {
-    return _processors[streamId];
+  /// Get a specific pipeline by stream ID
+  StreamPipeline? getPipeline(String streamId) {
+    return _pipelines[streamId];
   }
 }

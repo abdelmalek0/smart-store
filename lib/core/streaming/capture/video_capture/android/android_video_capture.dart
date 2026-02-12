@@ -8,7 +8,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
-import 'package:smart_store_linux/core/streaming/services/ffmpeg_video_service.dart';
+import 'package:smart_store_linux/core/streaming/video_bridge/video_bridge.dart';
 
 import '../video_capture.dart';
 
@@ -28,7 +28,7 @@ class AndroidVideoCapture implements VideoCapture {
     await _diagnosticSocketCheck(url);
 
     try {
-      final result = await FFmpegVideoService.openVideo(url);
+      final result = await VideoBridge.openVideo(url);
       if (result != null) {
         final streamId = result['videoId'] as int;
         final textureId = result['textureId'] as int;
@@ -48,7 +48,7 @@ class AndroidVideoCapture implements VideoCapture {
   @override
   Future<VideoCaptureFrame?> getFrame(int streamId) async {
     try {
-      final frameData = await FFmpegVideoService.getFrame(streamId);
+      final frameData = await VideoBridge.getFrame(streamId);
 
       if (frameData == null) {
         return null; // No frame available
@@ -69,7 +69,7 @@ class AndroidVideoCapture implements VideoCapture {
   @override
   Future<void> release(int streamId) async {
     try {
-      await FFmpegVideoService.releaseVideo(streamId);
+      await VideoBridge.releaseVideo(streamId);
       debugPrint("✓ Android: Video stream $streamId released");
     } catch (e) {
       debugPrint("❌ Android: Error releasing stream - $e");

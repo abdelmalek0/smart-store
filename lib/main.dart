@@ -13,7 +13,7 @@ import 'package:smart_store_linux/ui/providers/model_provider.dart';
 import 'package:smart_store_linux/ai/service/inference_service.dart';
 import 'package:smart_store_linux/ui/providers/inference_provider.dart';
 import 'package:smart_store_linux/ui/screens/main_layout.dart';
-import 'package:smart_store_linux/core/engine/pipeline/stream_manager.dart';
+import 'package:smart_store_linux/core/engine/stream_engine.dart';
 import 'package:smart_store_linux/core/config/config_service.dart';
 import 'package:smart_store_linux/core/resources/android/android_resource_monitor.dart'; // Add Android Monitor
 
@@ -115,7 +115,7 @@ class _VisionLabAppState extends State<VisionLabApp>
     debugPrint("[App] Shutting down native resources...");
     try {
       // 1. Stop high-level stream processing logic
-      StreamProcessManager.instance.clearAll();
+      StreamEngine.instance.clearAll();
 
       // 2. Stop resource monitor
       _monitor?.stop();
@@ -165,7 +165,7 @@ class _VisionLabAppState extends State<VisionLabApp>
             return provider;
           },
         ),
-        ChangeNotifierProvider(create: (_) => StreamProcessManager()),
+        ChangeNotifierProvider(create: (_) => StreamEngine()),
       ],
       child: MaterialApp(
         title: 'Smart Store',

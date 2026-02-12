@@ -2,14 +2,14 @@ import 'dart:isolate';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
-import 'package:smart_store_linux/core/streaming/isolates/isolate_params.dart';
+import 'package:smart_store_linux/core/streaming/capture/isolate_params.dart';
 import 'package:smart_store_linux/core/models/frames.dart';
 
-import 'package:smart_store_linux/core/streaming/isolates/capture_isolate.dart';
+import 'package:smart_store_linux/core/streaming/capture/capture_isolate.dart';
 import 'package:native_onnx/native_onnx.dart';
 
-/// Manages the Capture Isolate lifecycle and raw message parsing.
-class StreamCaptureManager {
+/// Controls the Capture Isolate lifecycle and raw message parsing.
+class CaptureIsolateController {
   final String streamUrl;
   final String streamId;
 
@@ -32,7 +32,7 @@ class StreamCaptureManager {
   Function(Map<int, String> labels)? onLabelsReceived;
   Function(int videoId, int? textureId)? onInitComplete;
 
-  StreamCaptureManager({
+  CaptureIsolateController({
     required this.streamUrl,
     required this.streamId,
     this.onFrameReceived,
@@ -46,7 +46,7 @@ class StreamCaptureManager {
     _captureReceivePort = ReceivePort();
     try {
       debugPrint(
-        'SCM: Spawning capture isolate for $streamId with modelPath=$modelPath',
+        'CaptureIsolateController: Spawning capture isolate for $streamId with modelPath=$modelPath',
       );
 
       _captureIsolate = await Isolate.spawn(
@@ -61,7 +61,9 @@ class StreamCaptureManager {
 
       _captureReceivePort!.listen(_handleMessage);
     } catch (e) {
-      debugPrint("SCM: Failed to spawn capture isolate: $e");
+      debugPrint(
+        "CaptureIsolateController: Failed to spawn capture isolate: $e",
+      );
     }
   }
 
@@ -71,7 +73,7 @@ class StreamCaptureManager {
         message['type'] == 'init') {
       if (message.containsKey('commandPort')) {
         _captureCommandPort = message['commandPort'] as SendPort;
-        debugPrint("✓ SCM: Received command port");
+        debugPrint("✓ CaptureIsolateController: Received command port");
       }
       return;
     }
@@ -124,7 +126,9 @@ class StreamCaptureManager {
     } else if (message is Map && message.containsKey('videoId')) {
       _nativeVideoId = message['videoId'] as int;
       _textureId = message['textureId'] as int;
-      debugPrint("SCM: Video Init. ID=$_nativeVideoId, Texture=$_textureId");
+      debugPrint(
+        "CaptureIsolateController: Video Init. ID=$_nativeVideoId, Texture=$_textureId",
+      );
       onInitComplete?.call(_nativeVideoId, _textureId);
     } else if (message is int) {
       // Legacy Linux ID only
@@ -134,7 +138,7 @@ class StreamCaptureManager {
   }
 
   Future<void> dispose() async {
-    debugPrint("SCM: Disposing capture manager for $streamId");
+    debugPrint("CaptureIsolateController: Disposing for $streamId");
 
     // Stop isolate
     if (_captureCommandPort != null) {
@@ -154,7 +158,7 @@ class StreamCaptureManager {
       try {
         NativeInferenceService().videoRelease(_nativeVideoId);
       } catch (e) {
-        debugPrint("SCM: Error releasing video: $e");
+        debugPrint("CaptureIsolateController: Error releasing video: $e");
       }
       _nativeVideoId = 0;
     }

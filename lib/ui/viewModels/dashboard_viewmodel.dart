@@ -1,6 +1,6 @@
 import 'package:flutter/foundation.dart';
-import 'package:smart_store_linux/core/engine/pipeline/stream_manager.dart';
-import 'package:smart_store_linux/core/plugins/registry/plugin_registry.dart';
+import 'package:smart_store_linux/core/engine/stream_engine.dart';
+import 'package:smart_store_linux/core/plugins/plugin_registry.dart';
 import 'package:smart_store_linux/ui/providers/app_provider.dart';
 import 'package:smart_store_linux/ui/providers/inference_provider.dart';
 import 'package:smart_store_linux/ui/providers/model_provider.dart';
@@ -38,19 +38,19 @@ class DashboardViewModel extends ChangeNotifier {
   double get ramTotal => appProvider.ramTotal;
   bool get supportsVRAM => appProvider.supportsVRAM;
 
-  /// Toggle engine on/off, coordinating StreamProcessManager.
+  /// Toggle engine on/off, coordinating StreamEngine.
   Future<void> toggleEngine() async {
     final shouldRun = !appProvider.isEngineRunning;
     appProvider.toggleEngine();
 
     if (shouldRun) {
-      StreamProcessManager.instance.startAll(
+      StreamEngine.instance.startAll(
         streamProvider.streams,
         inferenceProvider.streamModelMap,
         modelProvider.models,
       );
     } else {
-      await StreamProcessManager.instance.stopAll();
+      await StreamEngine.instance.stopAll();
     }
     notifyListeners();
   }

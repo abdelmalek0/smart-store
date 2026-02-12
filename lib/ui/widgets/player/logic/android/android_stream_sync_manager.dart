@@ -1,4 +1,4 @@
-import 'package:smart_store_linux/core/engine/pipeline/stream_processor.dart';
+import 'package:smart_store_linux/core/engine/stream_pipeline.dart';
 import '../stream_sync_manager.dart';
 
 /// Android implementation of StreamSyncManager
@@ -17,7 +17,7 @@ class AndroidStreamSyncManager extends StreamSyncManager {
   }
 
   @override
-  bool updateTextureFromProcessor(StreamProcessor processor) {
+  bool updateTextureFromProcessor(StreamPipeline processor) {
     if (_textureId == null && processor.textureId != null) {
       _textureId = processor.textureId;
       return true; // State changed
@@ -26,12 +26,12 @@ class AndroidStreamSyncManager extends StreamSyncManager {
   }
 
   @override
-  Future<void> maintainConnection(StreamProcessor processor) async {
+  Future<void> maintainConnection(StreamPipeline processor) async {
     // No-op on Android. Connection is handled natively.
   }
 
   @override
-  Future<bool> showFrame(StreamProcessor processor, int timestamp) async {
+  Future<bool> showFrame(StreamPipeline processor, int timestamp) async {
     if (_textureId != null) {
       final success = await processor.showFrame(timestamp);
       return success;

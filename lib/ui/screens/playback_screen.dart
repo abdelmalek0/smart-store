@@ -6,7 +6,7 @@ import 'package:smart_store_linux/ui/providers/model_provider.dart';
 import 'package:smart_store_linux/ui/providers/inference_provider.dart';
 import 'package:smart_store_linux/ui/widgets/modern_widgets.dart';
 import 'package:smart_store_linux/ui/widgets/player/detached_stream_player.dart';
-import 'package:smart_store_linux/core/engine/pipeline/stream_manager.dart';
+import 'package:smart_store_linux/core/engine/stream_engine.dart';
 import 'package:smart_store_linux/ui/widgets/live/camera_sidebar.dart';
 import 'package:smart_store_linux/ui/viewModels/playback_viewmodel.dart';
 
@@ -38,7 +38,7 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
       RTSPStreamProvider,
       InferenceProvider,
       ModelProvider,
-      StreamProcessManager
+      StreamEngine
     >(
       builder:
           (

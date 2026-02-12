@@ -1,7 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:smart_store_linux/core/config/config_service.dart';
 import 'package:smart_store_linux/core/models/plugin_info.dart';
-import 'package:smart_store_linux/core/plugins/registry/plugin_registry.dart';
+import 'package:smart_store_linux/core/plugins/plugin_registry.dart';
 import 'package:smart_store_linux/ui/providers/model_provider.dart';
 
 /// ViewModel for the Plugins tab.

@@ -76,7 +76,7 @@ class ModelProvider extends ChangeNotifier {
     }
   }
 
-  /// Get labels for a model by its path (used by StreamProcessor)
+  /// Get labels for a model by its path (used by StreamPipeline)
   Map<int, String>? getLabelsForModelPath(String modelPath) {
     // debugPrint("[LABELS LOOKUP] Searching for path: $modelPath");
     // debugPrint(

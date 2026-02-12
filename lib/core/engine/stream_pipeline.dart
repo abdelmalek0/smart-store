@@ -5,26 +5,26 @@ import 'package:smart_store_linux/core/config/constants.dart';
 import 'package:smart_store_linux/core/models/frames.dart';
 import 'package:smart_store_linux/core/streaming/models/rtsp_stream.dart';
 import 'package:smart_store_linux/ai/service/inference_service.dart';
-import 'package:smart_store_linux/core/streaming/services/ffmpeg_video_service.dart';
-import 'package:smart_store_linux/core/plugins/manager/plugin_manager.dart';
+import 'package:smart_store_linux/core/streaming/video_bridge/video_bridge.dart';
+import 'package:smart_store_linux/core/plugins/plugin_manager.dart';
 import 'package:smart_store_linux/core/config/config_service.dart';
-import 'package:smart_store_linux/core/plugins/registry/plugin_registry.dart';
+import 'package:smart_store_linux/core/plugins/plugin_registry.dart';
 
-import 'logic/stream_capture_manager.dart';
-import 'logic/stream_display_controller.dart';
+import 'package:smart_store_linux/core/streaming/capture/capture_isolate_controller.dart';
+import 'package:smart_store_linux/core/rendering/display_queue.dart';
 
-/// Headless stream processor that orchestrates Video Capture, Plugin Processing, and Display.
+/// Headless stream pipeline that orchestrates Video Capture, Plugin Processing, and Display.
 ///
 /// Architecture:
-/// - [StreamCaptureManager]: Handles Isolate spawning and raw frame parsing.
+/// - [CaptureIsolateController]: Handles Isolate spawning and raw frame parsing.
 /// - [PluginManager]: Handles inference and event logic.
-/// - [StreamDisplayController]: Handles display queue, backpressure, and broadcasting.
-class StreamProcessor {
+/// - [DisplayQueue]: Handles display queue, backpressure, and broadcasting.
+class StreamPipeline {
   final RTSPStream stream;
 
   // Managers
-  late final StreamCaptureManager _captureManager;
-  late final StreamDisplayController _displayController;
+  late final CaptureIsolateController _captureController;
+  late final DisplayQueue _displayQueue;
   PluginManager? _pluginManager;
 
   // State
@@ -41,21 +41,21 @@ class StreamProcessor {
   StreamSubscription? _pluginFrameSubscription;
 
   // Public Getters
-  Stream<ProcessedFrame> get frameStream => _displayController.frameStream;
+  Stream<ProcessedFrame> get frameStream => _displayQueue.frameStream;
 
-  int get nativeVideoId => _captureManager.nativeVideoId;
-  int? get textureId => _captureManager.textureId;
-  bool get isInitialized => _captureManager.nativeVideoId > 0;
+  int get nativeVideoId => _captureController.nativeVideoId;
+  int? get textureId => _captureController.textureId;
+  bool get isInitialized => _captureController.nativeVideoId > 0;
 
   int get frameWidth => _frameWidth;
   int get frameHeight => _frameHeight;
   Map<int, String> get modelLabels => _modelLabels;
-  bool get isFrozen => _displayController.isFrozen;
+  bool get isFrozen => _displayQueue.isFrozen;
 
   bool _isPluginActive = false;
 
-  StreamProcessor({required this.stream}) {
-    _captureManager = StreamCaptureManager(
+  StreamPipeline({required this.stream}) {
+    _captureController = CaptureIsolateController(
       streamUrl: stream.url,
       streamId: stream.id,
       onFrameReceived: _handleRawFrame,
@@ -65,13 +65,13 @@ class StreamProcessor {
         // UI will pull these from getters
       },
     );
-    _displayController = StreamDisplayController(stream.id);
+    _displayQueue = DisplayQueue(stream.id);
   }
 
-  /// Initialize the processor and start all loops
+  /// Initialize the pipeline and start all loops
   Future<void> initialize() async {
     try {
-      debugPrint("Starting Stream Processor for stream: ${stream.id}");
+      debugPrint("Starting Stream Pipeline for stream: ${stream.id}");
 
       // Initialize Plugin Manager
       _pluginManager = PluginManager(stream.id);
@@ -99,8 +99,8 @@ class StreamProcessor {
           "⚠️ No model assigned for stream ${stream.id}. Plugin will NOT start.",
         );
         _isPluginActive = false;
-        await _captureManager.start(null);
-        _displayController.startLoop();
+        await _captureController.start(null);
+        _displayQueue.startLoop();
         return;
       }
 
@@ -126,20 +126,20 @@ class StreamProcessor {
         processedFrame,
       ) {
         if (_pendingPluginFrames > 0) _pendingPluginFrames--;
-        _displayController.enqueue(processedFrame);
+        _displayQueue.enqueue(processedFrame);
       });
 
       // Events are emitted directly by PluginManager to EventService
 
       // Start Capture and Display
-      await _captureManager.start(modelPath);
-      _displayController.startLoop();
+      await _captureController.start(modelPath);
+      _displayQueue.startLoop();
     } catch (e) {
-      debugPrint("Error initializing processor for ${stream.id}: $e");
+      debugPrint("Error initializing pipeline for ${stream.id}: $e");
     }
   }
 
-  /// Handle Raw Frame from Capture Manager (Standard Path)
+  /// Handle Raw Frame from Capture Controller (Standard Path)
   void _handleRawFrame(RawFrame frame) {
     if (frame.width > 0) {
       _frameWidth = frame.width;
@@ -162,13 +162,13 @@ class StreamProcessor {
         inferenceEndMs: now,
         postprocessEndMs: now,
       );
-      if (_displayController.queueLength < Constants.displayQueueMaxSize) {
-        _displayController.enqueue(processed);
+      if (_displayQueue.queueLength < Constants.displayQueueMaxSize) {
+        _displayQueue.enqueue(processed);
       }
     }
   }
 
-  /// Handle Processed Frame from Capture Manager (Optimized Linux Path: Frame + Inference)
+  /// Handle Processed Frame from Capture Controller (Optimized Linux Path: Frame + Inference)
   void _handleProcessedFrame(ProcessedFrame processed) {
     if (processed.width > 0) {
       _frameWidth = processed.width;
@@ -192,24 +192,24 @@ class StreamProcessor {
       }
     } else {
       // Pass-through display
-      _displayController.enqueue(processed);
+      _displayQueue.enqueue(processed);
     }
   }
 
   void freeze() {
-    debugPrint("Freezing processor for ${stream.id}");
-    _displayController.setFrozen(true);
+    debugPrint("Freezing pipeline for ${stream.id}");
+    _displayQueue.setFrozen(true);
   }
 
   void unfreeze() {
-    debugPrint("Unfreezing processor for ${stream.id}");
-    _displayController.setFrozen(false);
+    debugPrint("Unfreezing pipeline for ${stream.id}");
+    _displayQueue.setFrozen(false);
   }
 
   Future<bool> showFrame(int timestamp) async {
-    if (_captureManager.nativeVideoId > 0) {
-      return await FFmpegVideoService.showFrame(
-        _captureManager.nativeVideoId,
+    if (_captureController.nativeVideoId > 0) {
+      return await VideoBridge.showFrame(
+        _captureController.nativeVideoId,
         timestamp,
       );
     }
@@ -217,14 +217,14 @@ class StreamProcessor {
   }
 
   Future<void> dispose() async {
-    debugPrint("Disposing processor for ${stream.id}");
+    debugPrint("Disposing pipeline for ${stream.id}");
 
-    await _captureManager.dispose();
-    _displayController.dispose();
+    await _captureController.dispose();
+    _displayQueue.dispose();
 
     _pluginFrameSubscription?.cancel();
     _pluginManager?.dispose();
 
-    debugPrint("Processor disposed for ${stream.id}");
+    debugPrint("Pipeline disposed for ${stream.id}");
   }
 }

@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:smart_store_linux/core/engine/pipeline/stream_manager.dart';
+import 'package:smart_store_linux/core/engine/stream_engine.dart';
 import 'package:smart_store_linux/ui/viewModels/events_viewmodel.dart';
 import 'package:smart_store_linux/core/events/events.dart';
 
@@ -73,9 +73,10 @@ class _EventsTabState extends State<EventsTab> {
                       final event = _vm.events[index];
                       // Resolve Camera Name from StreamManager
                       final streamId = event.streamId;
-                      final processor = StreamProcessManager.instance
-                          .getProcessor(streamId);
-                      final streamName = processor?.stream.name ?? streamId;
+                      final pipeline = StreamEngine.instance.getPipeline(
+                        streamId,
+                      );
+                      final streamName = pipeline?.stream.name ?? streamId;
 
                       return EventCard(event: event, streamName: streamName);
                     },

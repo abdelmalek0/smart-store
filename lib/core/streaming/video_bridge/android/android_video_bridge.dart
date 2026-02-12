@@ -1,7 +1,11 @@
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
 
-class AndroidFFmpegVideoService {
+/// Android native video bridge via MethodChannel.
+///
+/// All video operations go through the 'ffmpeg_video' MethodChannel
+/// to native Android code.
+class AndroidVideoBridge {
   static const MethodChannel _channel = MethodChannel('ffmpeg_video');
 
   static Future<Map<String, dynamic>?> openVideo(String url) async {
@@ -11,7 +15,7 @@ class AndroidFFmpegVideoService {
       });
       return result?.cast<String, dynamic>();
     } catch (e) {
-      debugPrint('AndroidFFmpegVideoService.openVideo error: $e');
+      debugPrint('AndroidVideoBridge.openVideo error: $e');
       return null;
     }
   }
@@ -21,7 +25,7 @@ class AndroidFFmpegVideoService {
       final result = await _channel.invokeMethod<Map>('getFrame', {'id': id});
       return result?.cast<String, dynamic>();
     } catch (e) {
-      print('AndroidFFmpegVideoService.getFrame error: $e');
+      debugPrint('AndroidVideoBridge.getFrame error: $e');
       return null;
     }
   }
@@ -30,7 +34,7 @@ class AndroidFFmpegVideoService {
     try {
       await _channel.invokeMethod('releaseVideo', {'id': id});
     } catch (e) {
-      print('AndroidFFmpegVideoService.releaseVideo error: $e');
+      debugPrint('AndroidVideoBridge.releaseVideo error: $e');
     }
   }
 
@@ -42,26 +46,8 @@ class AndroidFFmpegVideoService {
       });
       return success ?? false;
     } catch (e) {
-      print('AndroidFFmpegVideoService.showFrame error: $e');
+      debugPrint('AndroidVideoBridge.showFrame error: $e');
       return false;
-    }
-  }
-
-  static Future<Map<String, double>?> getSystemStats() async {
-    try {
-      final result = await _channel.invokeMethod<Map>('getSystemStats');
-      if (result != null) {
-        final stats = <String, double>{};
-        result.forEach((key, value) {
-          if (key is String && value is num) {
-            stats[key] = value.toDouble();
-          }
-        });
-        return stats;
-      }
-      return null;
-    } catch (e) {
-      return null;
     }
   }
 }

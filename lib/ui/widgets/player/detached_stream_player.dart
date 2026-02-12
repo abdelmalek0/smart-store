@@ -4,7 +4,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:smart_store_linux/ui/utils/theme/app_theme.dart';
-import 'package:smart_store_linux/core/engine/pipeline/stream_manager.dart';
+import 'package:smart_store_linux/core/engine/stream_engine.dart';
 import 'package:smart_store_linux/core/models/frames.dart';
 import 'package:smart_store_linux/core/config/config_service.dart';
 import 'package:smart_store_linux/ui/providers/model_provider.dart';
@@ -45,7 +45,7 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
   int _currentWidth = 1920; // Default to full HD
   int _currentHeight = 1080;
 
-  // Model labels from ONNX metadata (received from StreamProcessor)
+  // Model labels from ONNX metadata (received from StreamPipeline)
   Map<int, String> _modelLabels = {};
 
   // User-uploaded custom labels (takes priority over _modelLabels)
@@ -68,7 +68,7 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
     if (_frameSubscription != null) return; // Already listening
 
     try {
-      final externalProcessor = StreamProcessManager.instance.getProcessor(
+      final externalProcessor = StreamEngine.instance.getPipeline(
         widget.streamId,
       );
 
@@ -184,7 +184,7 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
   bool _updateLabels() {
     if (!mounted) return false;
 
-    // Get model path using same resolution logic as StreamProcessor
+    // Get model path using same resolution logic as StreamPipeline
     String? effectiveModelPath = ConfigService.instance.getModelForStream(
       widget.streamId,
     );

@@ -6,7 +6,7 @@ import 'package:smart_store_linux/core/config/constants.dart';
 import 'package:smart_store_linux/core/models/frames.dart';
 
 /// Manages the display queue, backpressure, and frame broadcasting.
-class StreamDisplayController {
+class DisplayQueue {
   final String streamId;
 
   // Configuration
@@ -27,7 +27,7 @@ class StreamDisplayController {
   bool get isFrozen => _isFrozen;
   int get queueLength => _displayQueue.length;
 
-  StreamDisplayController(this.streamId);
+  DisplayQueue(this.streamId);
 
   /// Add a frame to the queue, managing backpressure
   void enqueue(ProcessedFrame frame) {
@@ -39,7 +39,7 @@ class StreamDisplayController {
 
   /// Start the display loop
   void startLoop() async {
-    debugPrint("SDC: Starting display loop for $streamId");
+    debugPrint("DisplayQueue: Starting display loop for $streamId");
 
     while (_isActive) {
       ProcessedFrame? frameToDisplay;
@@ -68,11 +68,11 @@ class StreamDisplayController {
           _displayCount++;
 
           if (_displayCount % 60 == 0) {
-            // debugPrint("SDC: Display loop emitting frame #${_displayCount}. Q: $_displayQueue.length");
+            // debugPrint("DisplayQueue: Display loop emitting frame #${_displayCount}. Q: $_displayQueue.length");
           }
         }
       } catch (e) {
-        debugPrint("SDC: Error in display loop: $e");
+        debugPrint("DisplayQueue: Error in display loop: $e");
       }
 
       // Adaptive timing
@@ -86,7 +86,7 @@ class StreamDisplayController {
 
   void setFrozen(bool frozen) {
     _isFrozen = frozen;
-    debugPrint("SDC: Frozen state set to $_isFrozen for $streamId");
+    debugPrint("DisplayQueue: Frozen state set to $_isFrozen for $streamId");
   }
 
   void dispose() {
@@ -95,6 +95,6 @@ class StreamDisplayController {
     if (!_frameStreamController.isClosed) {
       _frameStreamController.close();
     }
-    debugPrint("SDC: Disposed controller for $streamId");
+    debugPrint("DisplayQueue: Disposed for $streamId");
   }
 }

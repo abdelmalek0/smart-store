@@ -1,7 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:smart_store_linux/core/rendering/texture_service.dart';
-import 'package:smart_store_linux/core/streaming/services/ffmpeg_video_service.dart';
-import 'package:smart_store_linux/core/engine/pipeline/stream_processor.dart';
+import 'package:smart_store_linux/core/streaming/video_bridge/video_bridge.dart';
+import 'package:smart_store_linux/core/engine/stream_pipeline.dart';
 import '../stream_sync_manager.dart';
 
 /// Linux implementation of StreamSyncManager
@@ -40,14 +40,14 @@ class LinuxStreamSyncManager extends StreamSyncManager {
   }
 
   @override
-  bool updateTextureFromProcessor(StreamProcessor processor) {
+  bool updateTextureFromProcessor(StreamPipeline processor) {
     // No-op for Linux usually, as we create texture explicitly.
     // Unless we change architecture to have processor create it.
     return false;
   }
 
   @override
-  Future<void> maintainConnection(StreamProcessor processor) async {
+  Future<void> maintainConnection(StreamPipeline processor) async {
     if (!_isTextureConnected &&
         _textureManagerId != null &&
         processor.nativeVideoId > 0) {
@@ -65,9 +65,9 @@ class LinuxStreamSyncManager extends StreamSyncManager {
   }
 
   @override
-  Future<bool> showFrame(StreamProcessor processor, int timestamp) async {
+  Future<bool> showFrame(StreamPipeline processor, int timestamp) async {
     if (_textureManagerId != null && _textureId != null) {
-      final success = await FFmpegVideoService.showFrame(
+      final success = await VideoBridge.showFrame(
         _textureManagerId!,
         timestamp,
       );
