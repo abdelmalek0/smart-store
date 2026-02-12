@@ -44,7 +44,6 @@ void main() async {
     await NativeInferenceService().init();
 
     WindowOptions windowOptions = const WindowOptions(
-      fullScreen: true,
       center: true,
       backgroundColor: Colors.transparent,
       skipTaskbar: false,
@@ -53,6 +52,7 @@ void main() async {
 
     windowManager.waitUntilReadyToShow(windowOptions, () async {
       await windowManager.show();
+      await windowManager.maximize();
       await windowManager.focus();
     });
   }
