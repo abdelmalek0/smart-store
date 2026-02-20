@@ -1,5 +1,5 @@
 import 'package:flutter/foundation.dart';
-import 'package:smart_store_linux/core/streaming/models/rtsp_stream.dart';
+import 'package:smart_store_linux/core/config/models/stream_config.dart';
 
 /// ViewModel for the Playback / Live Monitoring screen.
 ///
@@ -20,7 +20,7 @@ class PlaybackViewModel extends ChangeNotifier {
   }
 
   /// Auto-select first stream if none selected.
-  void autoSelectFirst(List<RTSPStream> streams) {
+  void autoSelectFirst(List<StreamConfig> streams) {
     if (_selectedStreamId == null && streams.isNotEmpty) {
       _selectedStreamId = streams.first.id;
       // Don't notify — this is called from build; caller handles rebuild.

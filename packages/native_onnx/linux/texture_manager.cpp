@@ -298,6 +298,8 @@ bool TextureManager::setPendingGpuFrame(int texture_id, const cv::cuda::GpuMat& 
     cv::cuda::GpuMat buffer_copy = rgba_gpu.clone();
     info->frame_buffer[timestamp] = buffer_copy;
     
+
+    // 2. Auto-Play Mode (During Warmup)
     // Limit buffer size (max 60 frames ~ 2 sec)
     if (info->frame_buffer.size() > 60) {
         // Remove oldest
@@ -339,19 +341,33 @@ bool TextureManager::showFrame(int texture_id, int64_t timestamp) {
         return true;
     }
     
-    // Frame not found (dropped or not arrived yet)
-    // Check if we have OLDER frames than requested timestamp?
-    // If we have T1, T2 and request is T5. We should technically keep T1, T2 in case T3, T4 comes?
-    // No, if request is T5, it means UI is ready for T5. T1 and T2 are useless now.
-    // Prune everything older than timestamp
-    auto it_older = info->frame_buffer.begin();
-    while (it_older != info->frame_buffer.end() && it_older->first < timestamp) {
-         it_older = info->frame_buffer.erase(it_older);
+    // Frame not found - use oldest available frame as fallback (UI is behind)
+    if (!info->frame_buffer.empty()) {
+        auto it_oldest = info->frame_buffer.begin();
+        
+        // Log fallback usage periodically
+        static int fallback_count = 0;
+        if (++fallback_count % 60 == 0) {
+            std::cout << "[TextureManager] Fallback: Using frame " << it_oldest->first 
+                      << " (requested " << timestamp << "), buffer size: " 
+                      << info->frame_buffer.size() << std::endl;
+        }
+        
+        info->pending_gpu_frame = it_oldest->second.clone();
+        info->has_pending_gpu_frame = true;
+        
+        // Remove this frame from buffer
+        info->frame_buffer.erase(it_oldest);
+        
+        return true;
     }
     
-    std::cerr << "[TextureManager] ShowFrame failed: Requested " << timestamp 
-              << ", Oldest in buffer: " << (info->frame_buffer.empty() ? -1 : info->frame_buffer.begin()->first) 
-              << ", Newest: " << (info->frame_buffer.empty() ? -1 : info->frame_buffer.rbegin()->first) << std::endl;
+    // No frames available at all - this is the real error
+    static int fail_count = 0;
+    if (++fail_count % 30 == 0) {
+        std::cerr << "[TextureManager] ❌ ShowFrame FAILED: Requested " << timestamp 
+                  << ", buffer is EMPTY" << std::endl;
+    }
 
     return false;
 }

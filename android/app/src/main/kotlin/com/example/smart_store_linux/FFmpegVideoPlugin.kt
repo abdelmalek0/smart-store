@@ -29,7 +29,7 @@ class FFmpegVideoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     private var npuStatsDisabled = false
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
-        channel = MethodChannel(binding.binaryMessenger, "ffmpeg_video")
+        channel = MethodChannel(binding.binaryMessenger, "smart_store_linux/video_bridge")
         channel.setMethodCallHandler(this)
         textureRegistry = binding.textureRegistry
         applicationContext = binding.applicationContext
@@ -74,7 +74,12 @@ class FFmpegVideoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 
                 if (id != null && timestamp != null && streams.containsKey(id)) {
                     val success = streams[id]!!.showFrame(timestamp)
-                    result.success(success)
+                    if (success) {
+                        result.success(true)
+                    } else {
+                        val keys = streams[id]!!.getBufferKeys().take(10).joinToString(",")
+                        result.error("FRAME_NOT_FOUND", "Frame $timestamp not found. Available: $keys", null)
+                    }
                 } else {
                     result.error("INVALID_ARGS", "Stream $id or TS $timestamp not found", null)
                 }
@@ -160,10 +165,10 @@ class FFmpegVideoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                          // Simple approach: Read /proc/stat if generic linux kernel accessible
                          var cpuLoad = 0.0
                          try {
-                              // Simplified one-shot - reliable delta requires state
-                              // For now, return 0.0 or random fluctuation?
-                              // Let's rely on Dart side for simulated CPU if native fails, 
-                              // or just return 0 if restricted.
+                               // Simplified one-shot - reliable delta requires state
+                               // For now, return 0.0 or random fluctuation?
+                               // Let's rely on Dart side for simulated CPU if native fails, 
+                               // or just return 0 if restricted.
                          } catch(e: Exception) {}
 
                          val stats = mapOf(
@@ -302,8 +307,12 @@ class FFmpegStream(
                         }
 
                         // 1b. Buffer Bitmap for Display (Render-on-Demand)
-                        val storedBitmap = rawBitmap.copy(Bitmap.Config.ARGB_8888, false)
-                        frameBuffer[timestamp] = storedBitmap
+                        try {
+                            val storedBitmap = rawBitmap.copy(Bitmap.Config.ARGB_8888, false)
+                            frameBuffer[timestamp] = storedBitmap
+                        } catch (e: Exception) {
+                            android.util.Log.e("FFmpegStream", "Failed to copy/store bitmap for $timestamp: $e")
+                        }
                         
                         // Prune buffer (Max 60 frames ~ 2 sec history)
                         if (frameBuffer.size > 60) {
@@ -313,12 +322,11 @@ class FFmpegStream(
                                 old?.recycle()
                             }
                         }
+                    } else {
+                         android.util.Log.w("FFmpegStream", "Converter returned null bitmap for $timestamp")
                     }
                     
                     // 2. Prepare Data for Dart (Inference)
-                    // Throttle sending to Dart? (e.g. max 15fps) to save bandwidth?
-                    // Currently relying on Dart's async queue to backpressure.
-                    
                     val w = frame.imageWidth
                     val h = frame.imageHeight
                     
@@ -354,12 +362,6 @@ class FFmpegStream(
                          }
                     }
                     
-                    // Cleanup old frames
-                    if (frameBuffer.size > 60) {
-                         val min = frameBuffer.keys().asSequence().minOrNull()
-                         if (min != null) frameBuffer.remove(min)?.recycle()
-                    }
-                    
                     // 3. Pacing (Sleep)
                     if (targetDelay > 0) {
                         // Subtract processing time for accuracy
@@ -369,7 +371,7 @@ class FFmpegStream(
                     } else {
                         Thread.sleep(5) // Default poll
                     }
-                }
+                } // End while
             } catch (e: Exception) {
                 android.util.Log.e("FFmpegStream", "Loop error: $e")
             } finally {
@@ -387,17 +389,20 @@ class FFmpegStream(
                     textureEntry.release()
                 }
             }
-        }
+        } // End thread
+    } // End start
+
+    fun getBufferKeys(): List<Long> {
+        return frameBuffer.keys().toList().sorted()
     }
-    
+
     fun showFrame(timestamp: Long): Boolean {
         // Switch to synchronized mode on first command
         autoDisplay.set(false)
         
         val bitmap = frameBuffer.remove(timestamp) // Get and remove (consume)
         if (bitmap != null) {
-            // SYNC FIX: Wait for render to complete before returning
-            // This prevents overlay from updating ahead of the displayed frame
+            android.util.Log.d("FFmpegStream", "Showing frame $timestamp")
             val latch = CountDownLatch(1)
             renderHandler.post {
                 try {
@@ -408,7 +413,11 @@ class FFmpegStream(
                             if (canvas != null) {
                                 canvas.drawBitmap(bitmap, null, rect, null)
                                 surface!!.unlockCanvasAndPost(canvas)
+                            } else {
+                                android.util.Log.e("FFmpegStream", "Canvas null for $timestamp")
                             }
+                        } else {
+                            android.util.Log.e("FFmpegStream", "Surface invalid for $timestamp")
                         }
                     }
                 } catch (e: Exception) {
@@ -422,7 +431,10 @@ class FFmpegStream(
             latch.await(50, TimeUnit.MILLISECONDS)
             return true
         } else {
-             // android.util.Log.w("FFmpegStream", "Frame $timestamp not found in buffer")
+             val keys = frameBuffer.keys().toList().sorted()
+             val min = keys.firstOrNull() ?: -1
+             val max = keys.lastOrNull() ?: -1
+             android.util.Log.w("FFmpegStream", "Frame $timestamp not found. Buffer Size: ${frameBuffer.size}. Range: [$min - $max]")
              return false
         }
     }
@@ -461,4 +473,3 @@ class FFmpegStream(
         isRunning.set(false)
     }
 }
-

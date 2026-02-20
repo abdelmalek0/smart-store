@@ -51,6 +51,8 @@ Future<void> _captureLoopAsync(IsolateInitParams params) async {
 
   VideoCaptureResult? videoStream;
   int lastFrameTime = DateTime.now().millisecondsSinceEpoch;
+  int frameCount = 0;
+  int lastFrameProcessedTime = DateTime.now().millisecondsSinceEpoch;
 
   // Frame rate limiting (removed)
 
@@ -121,10 +123,22 @@ Future<void> _captureLoopAsync(IsolateInitParams params) async {
         final frame = await capture.getFrame(videoStream.streamId);
 
         if (frame != null) {
-          lastFrameTime = DateTime.now().millisecondsSinceEpoch;
+          final now = DateTime.now().millisecondsSinceEpoch;
+          lastFrameTime = now;
+          frameCount++;
+
+          final timeSinceLastFrame = now - lastFrameProcessedTime;
+          lastFrameProcessedTime = now;
 
           // Check if this is an optimized frame with inference results
           if (frame is LinuxOptimizedFrame) {
+            // Log every 30 frames to track inference rate
+            if (frameCount % 30 == 0) {
+              debugPrint(
+                "📊 CaptureIsolate: Frame #$frameCount (OPTIMIZED with inference) - "
+                "Time since last: ${timeSinceLastFrame}ms, Inference time: ${frame.inferenceTime}ms",
+              );
+            }
             // Send processed frame message
             final transferable = TransferableTypedData.fromList([frame.data]);
             params.sendPort.send([
@@ -135,9 +149,16 @@ Future<void> _captureLoopAsync(IsolateInitParams params) async {
               frame.timestamp,
               frame.detections,
               frame.inferenceTime,
+              DateTime.now().millisecondsSinceEpoch, // generationTime
             ]);
           } else {
-            // Standard frame
+            // Standard frame (no inference)
+            if (frameCount % 30 == 0) {
+              debugPrint(
+                "📊 CaptureIsolate: Frame #$frameCount (STANDARD no inference) - "
+                "Time since last: ${timeSinceLastFrame}ms",
+              );
+            }
             final transferable = TransferableTypedData.fromList([frame.data]);
             params.sendPort.send([
               'frame',
@@ -145,6 +166,7 @@ Future<void> _captureLoopAsync(IsolateInitParams params) async {
               frame.width,
               frame.height,
               frame.timestamp,
+              DateTime.now().millisecondsSinceEpoch, // generationTime
             ]);
           }
         } else {

@@ -250,13 +250,14 @@ void VideoManager::SetTextureManagerId(int64_t video_id, int texture_manager_id)
     auto ctx = GetContext(video_id);
     if (ctx) {
         std::lock_guard<std::mutex> lock(ctx->mutex);
+        
         ctx->texture_manager_id = texture_manager_id;
         ctx->use_gpu_texture = true;
         std::cout << "[BRIDGE] Linked video " << video_id << " to texture manager " << texture_manager_id << std::endl;
     }
 }
 
-int VideoManager::GetFrame(int64_t video_id, uint8_t** out_buffer, int* width, int* height, int64_t* out_timestamp) {
+int VideoManager::GetFrame(int64_t video_id, uint8_t** out_buffer, int* width, int* height, int64_t* out_timestamp, bool add_to_texture_buffer) {
     std::shared_ptr<VideoContext> ctx;
     
     {
@@ -337,6 +338,18 @@ int VideoManager::GetFrame(int64_t video_id, uint8_t** out_buffer, int* width, i
     frame_counts[video_id]++;
     if (out_timestamp) *out_timestamp = timestamp;
 
+    // Check for loop (timestamp reset)
+    if (timestamp < ctx->last_timestamp && ctx->texture_manager_id > 0) {
+        // If timestamp jumped back significantly (likely loop)
+        // We clear the texture buffer to avoid "too old" rejection
+        auto tex = texture_manager::TextureManager::getInstance().getTexture(ctx->texture_manager_id);
+        if (tex) {
+             tex->resetBuffer();
+             // std::cout << "[VideoManager] Video looped (TS: " << timestamp << " < " << ctx->last_timestamp << ") - Reset buffer" << std::endl;
+        }
+    }
+    ctx->last_timestamp = timestamp;
+
     if (ctx->use_gpu_texture && (ctx->texture_id > 0 || ctx->texture_manager_id > 0)) {
         int src_width = ctx->frame->width;
         int src_height = ctx->frame->height;
@@ -411,8 +424,11 @@ int VideoManager::GetFrame(int64_t video_id, uint8_t** out_buffer, int* width, i
 #ifdef USE_NPP
 npp_done:
 #endif
-            int tex_id = ctx->texture_manager_id > 0 ? ctx->texture_manager_id : ctx->texture_id;
-            texture_manager::TextureManager::getInstance().setPendingGpuFrame(tex_id, rgba_gpu, timestamp);
+            // Only add to texture buffer if requested (skip for inference path)
+            if (add_to_texture_buffer) {
+                int tex_id = ctx->texture_manager_id > 0 ? ctx->texture_manager_id : ctx->texture_id;
+                texture_manager::TextureManager::getInstance().setPendingGpuFrame(tex_id, rgba_gpu, timestamp);
+            }
             
             ctx->last_rgba_gpu = rgba_gpu;
             ctx->has_gpu_frame = true;

@@ -190,8 +190,9 @@ class NativeInferenceService {
     inputs.forEach((name, tensor) {
       final namePtr = name.toNativeUtf8();
       final dimsPtr = calloc<Int64>(tensor.shape.length);
-      for (int i = 0; i < tensor.shape.length; i++)
+      for (int i = 0; i < tensor.shape.length; i++) {
         dimsPtr[i] = tensor.shape[i];
+      }
 
       _addInput(id, namePtr, tensor.dataPtr, dimsPtr, tensor.shape.length);
 
@@ -209,7 +210,9 @@ class NativeInferenceService {
     final result = _run(id, outNamesPtr, outputNames.length);
 
     // Cleanup names
-    for (int i = 0; i < outputNames.length; i++) calloc.free(outNamesPtr[i]);
+    for (int i = 0; i < outputNames.length; i++) {
+      calloc.free(outNamesPtr[i]);
+    }
     calloc.free(outNamesPtr);
 
     if (result != 0) throw Exception("Inference Failed with code $result");
@@ -232,7 +235,9 @@ class NativeInferenceService {
 
         // Shape
         List<int> shape = [];
-        for (int d = 0; d < rank; d++) shape.add(dimsPtr[d]);
+        for (int d = 0; d < rank; d++) {
+          shape.add(dimsPtr[d]);
+        }
 
         outputs[outputNames[i]] = [dataList, shape];
       } else {
@@ -318,7 +323,9 @@ class NativeInferenceService {
       );
     } finally {
       calloc.free(inputNamePtr);
-      for (int i = 0; i < outputNames.length; i++) calloc.free(outNamesPtr[i]);
+      for (int i = 0; i < outputNames.length; i++) {
+        calloc.free(outNamesPtr[i]);
+      }
       calloc.free(outNamesPtr);
     }
   }
@@ -347,7 +354,9 @@ class NativeInferenceService {
           final dataList = Float32List.fromList(dataPtr.asTypedList(count));
 
           List<int> shape = [];
-          for (int d = 0; d < rank; d++) shape.add(dimsPtr[d]);
+          for (int d = 0; d < rank; d++) {
+            shape.add(dimsPtr[d]);
+          }
 
           outputs[outputNames[i]] = [dataList, shape];
         }
@@ -408,8 +417,9 @@ class NativeInferenceService {
     // Remove outer braces if present
     var content = labelsStr.trim();
     if (content.startsWith('{')) content = content.substring(1);
-    if (content.endsWith('}'))
+    if (content.endsWith('}')) {
       content = content.substring(0, content.length - 1);
+    }
 
     // Parse each key-value pair
     // Format: 0: 'person', 1: 'bicycle', ...

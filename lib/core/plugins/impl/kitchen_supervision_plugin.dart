@@ -107,24 +107,16 @@ class KitchenSupervisionPlugin extends SmartStorePlugin {
     final requestId = result['requestId'] as int;
     final frame = getPendingFrame(requestId);
 
-    if (frame != null) {
-      final processingStartMs = result['processingStartMs'] as int? ?? 0;
-      final inferenceEndMs = DateTime.now().millisecondsSinceEpoch;
+    final processingStartMs = result['processingStartMs'] as int? ?? 0;
+    final inferenceEndMs = DateTime.now().millisecondsSinceEpoch;
 
-      // DEBUG: Log detections similar to PeopleCountingPlugin
-      // if (detections.isNotEmpty) {
-      // debugPrint(
-      //   "KitchenSupervisionPlugin [$streamId]: Frame processed. Total Detections: ${detections.length}, Hands: ${handDetections.length}, Hand Detected: $handDetected",
-      // );
-      // }
-
-      emitDisplayFrame(frame, handDetections, {
-        'decode': 0,
-        'inference': (processingStartMs > 0)
-            ? (inferenceEndMs - processingStartMs)
-            : 0,
-        'postprocess': 0,
-      });
-    }
+    // Call emitDisplayFrame even if frame is null (Native Mode)
+    emitDisplayFrame(frame, handDetections, {
+      'decode': frame?.decodeTimestamp ?? processingStartMs,
+      'inference': (processingStartMs > 0)
+          ? (inferenceEndMs - processingStartMs)
+          : 0,
+      'postprocess': 0,
+    });
   }
 }

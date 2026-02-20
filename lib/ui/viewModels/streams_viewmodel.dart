@@ -1,28 +1,44 @@
 import 'package:flutter/foundation.dart';
-import 'package:smart_store_linux/core/streaming/models/rtsp_stream.dart';
-import 'package:smart_store_linux/ui/providers/rtsp_stream_provider.dart';
+import 'package:smart_store_linux/core/services/app/app_service.dart';
+import 'package:smart_store_linux/core/config/models/stream_config.dart';
+import 'package:uuid/uuid.dart';
 
 /// ViewModel for the Streams screen.
 ///
 /// Owns stream add/remove and form validation.
 class StreamsViewModel extends ChangeNotifier {
-  final RTSPStreamProvider streamProvider;
+  final AppService _appService;
 
-  StreamsViewModel({required this.streamProvider});
+  StreamsViewModel(this._appService) {
+    _appService.streams.addListener(notifyListeners);
+  }
 
-  List<RTSPStream> get streams => streamProvider.streams;
+  @override
+  void dispose() {
+    _appService.streams.removeListener(notifyListeners);
+    super.dispose();
+  }
+
+  List<StreamConfig> get streams => _appService.streams.all;
 
   /// Add a new RTSP stream. Returns true on success.
-  bool addStream(String name, String url) {
+  Future<bool> addStream(String name, String url) async {
     if (name.trim().isEmpty || url.trim().isEmpty) return false;
-    streamProvider.addStream(url.trim(), name: name.trim());
+
+    final newStream = StreamConfig(
+      id: const Uuid().v4(),
+      url: url.trim(),
+      name: name.trim(),
+    );
+
+    await _appService.streams.add(newStream);
     notifyListeners();
     return true;
   }
 
   /// Remove a stream by ID.
-  void removeStream(String streamId) {
-    streamProvider.removeStream(streamId);
+  Future<void> removeStream(String streamId) async {
+    await _appService.streams.remove(streamId);
     notifyListeners();
   }
 }

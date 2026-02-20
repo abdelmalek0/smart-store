@@ -1,45 +1,48 @@
-import 'package:flutter/material.dart';
-import 'package:smart_store_linux/core/models/plugin_info.dart';
+import 'package:smart_store_linux/core/plugins/plugin_runtime.dart';
 
-/// Central registry of all available plugins.
+/// Registry for active [PluginRuntime] instances.
 ///
-/// Single source of truth — replaces hardcoded lists in
-/// [PluginsTab], [ConfigurationScreen], and [StreamPipeline].
+/// Keeps track of all active plugin runtimes.
+/// Does NOT manage lifecycle or frame routing (that's PluginManager).
 class PluginRegistry {
-  PluginRegistry._();
+  static final PluginRegistry _instance = PluginRegistry._internal();
+  factory PluginRegistry() => _instance;
+  static PluginRegistry get instance => _instance;
+  PluginRegistry._internal();
 
-  static const List<PluginInfo> plugins = [
-    PluginInfo(
-      id: 'people_counting',
-      name: 'People Counting',
-      description: 'Initializes YOLO model to count people.',
-      icon: Icons.people_alt_rounded,
-      isActive: true,
-      defaultConfig: {'personClassId': 0, 'confidenceThreshold': 0.5},
-    ),
-    PluginInfo(
-      id: 'kitchen_supervision',
-      name: 'Kitchen Supervision',
-      description: 'Detects bare hands (no gloves) for 5 seconds.',
-      icon: Icons.restaurant_rounded,
-      isActive: true,
-      defaultConfig: {
-        'handClassId': 4,
-        'gloveClassId': 0,
-        'confidenceThreshold': 0.5,
-      },
-    ),
-  ];
+  // Active Plugin Instances: Map<StreamId, List<PluginRuntime>>
+  final Map<String, List<PluginRuntime>> _activeInstances = {};
 
-  /// Find a plugin by its ID, or null if not registered.
-  static PluginInfo? findById(String id) {
-    try {
-      return plugins.firstWhere((p) => p.id == id);
-    } catch (_) {
-      return null;
+  /// Register a runtime for a stream
+  void register(String streamId, PluginRuntime runtime) {
+    if (!_activeInstances.containsKey(streamId)) {
+      _activeInstances[streamId] = [];
+    }
+    _activeInstances[streamId]!.add(runtime);
+  }
+
+  /// Unregister a specific runtime
+  void unregister(String streamId, PluginRuntime runtime) {
+    if (_activeInstances.containsKey(streamId)) {
+      _activeInstances[streamId]!.remove(runtime);
+      if (_activeInstances[streamId]!.isEmpty) {
+        _activeInstances.remove(streamId);
+      }
     }
   }
 
-  /// Plugin IDs as a simple list (useful for dropdowns).
-  static List<String> get pluginIds => plugins.map((p) => p.id).toList();
+  /// Unregister all runtimes for a stream
+  void unregisterAll(String streamId) {
+    _activeInstances.remove(streamId);
+  }
+
+  /// Get active runtimes for a stream
+  List<PluginRuntime> get(String streamId) {
+    return _activeInstances[streamId] ?? [];
+  }
+
+  /// Get all active runtimes across all streams
+  List<PluginRuntime> getAll() {
+    return _activeInstances.values.expand((element) => element).toList();
+  }
 }

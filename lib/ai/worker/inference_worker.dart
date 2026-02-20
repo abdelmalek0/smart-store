@@ -44,10 +44,10 @@ class InferenceWorker {
   // Configuration Constants - Optimized for Low Latency
   // ========================================
   // Using centralized Constants for consistency
-  static const int MAX_BATCH_SIZE = AiConstants.maxBatchSize;
-  static const int BATCH_WINDOW_MS = AiConstants.inferenceBatchIntervalMs;
-  static const int QUEUE_SEARCH_LIMIT = 10; // Max items to search in queue
-  static const int QUEUE_POLL_MS = 0; // Immediate polling for minimal latency
+  static const int maxBatchSize = AiConstants.maxBatchSize;
+  static const int batchWindowMs = AiConstants.inferenceBatchIntervalMs;
+  static const int queueSearchLimit = 10; // Max items to search in queue
+  static const int queuePollMs = 0; // Immediate polling for minimal latency
 
   InferenceWorker(this.mainSendPort);
 
@@ -90,7 +90,7 @@ class InferenceWorker {
     while (true) {
       // Wait for requests
       if (_requestQueue.isEmpty) {
-        await Future.delayed(Duration(milliseconds: QUEUE_POLL_MS));
+        await Future.delayed(Duration(milliseconds: queuePollMs));
         continue;
       }
 
@@ -107,15 +107,15 @@ class InferenceWorker {
       // Collect Additional Batch Items
       // ========================================
       // Collect more items for the same model, but one per stream
-      while (stopwatch.elapsedMilliseconds < BATCH_WINDOW_MS &&
-          batch.length < MAX_BATCH_SIZE) {
+      while (stopwatch.elapsedMilliseconds < batchWindowMs &&
+          batch.length < maxBatchSize) {
         if (_requestQueue.isNotEmpty) {
           final List<WorkerRequest> skipped = [];
           int searched = 0;
 
           while (_requestQueue.isNotEmpty &&
-              searched < QUEUE_SEARCH_LIMIT &&
-              batch.length < MAX_BATCH_SIZE) {
+              searched < queueSearchLimit &&
+              batch.length < maxBatchSize) {
             final req = _requestQueue.removeFirst();
             searched++;
 
@@ -133,7 +133,7 @@ class InferenceWorker {
             _requestQueue.addFirst(r);
           }
 
-          if (batch.length == MAX_BATCH_SIZE) break;
+          if (batch.length == maxBatchSize) break;
         }
 
         await Future.delayed(const Duration(milliseconds: 1));
@@ -198,7 +198,7 @@ class InferenceWorker {
       final results = await _backend.run(modelId, inputs);
 
       inferenceStopwatch.stop();
-      final inferenceMs = inferenceStopwatch.elapsedMilliseconds;
+      // final inferenceMs = inferenceStopwatch.elapsedMilliseconds;
 
       if (results.length != batch.length) {
         _failBatch(
@@ -297,12 +297,12 @@ class InferenceWorker {
       postprocessStopwatch.stop();
       totalStopwatch.stop();
 
-      debugPrint(
-        "⏱️ Batch[${batch.length}] timing: "
-        "Inference=${inferenceMs}ms | "
-        "Postprocess=${postprocessStopwatch.elapsedMilliseconds}ms | "
-        "Total=${totalStopwatch.elapsedMilliseconds}ms",
-      );
+      // debugPrint(
+      //   "⏱️ Batch[${batch.length}] timing: "
+      //   "Inference=${inferenceMs}ms | "
+      //   "Postprocess=${postprocessStopwatch.elapsedMilliseconds}ms | "
+      //   "Total=${totalStopwatch.elapsedMilliseconds}ms",
+      // );
     } catch (e, st) {
       debugPrint("Worker Batch Error: $e\n$st");
       _failBatch(batch, e.toString());

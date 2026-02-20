@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:smart_store_linux/core/events/events.dart';
-import 'package:smart_store_linux/core/events/event_service.dart';
+import 'package:smart_store_linux/core/services/app/app_service.dart';
 
 /// ViewModel for the Events tab.
 ///
@@ -13,12 +13,14 @@ class EventsViewModel extends ChangeNotifier {
   List<AppEvent> get events => List.unmodifiable(_events);
   int get eventCount => _events.length;
 
-  EventsViewModel() {
+  final AppService _appService;
+
+  EventsViewModel(this._appService) {
     _init();
   }
 
   void _init() {
-    _subscription = EventService.instance.eventStream.listen((event) {
+    _subscription = _appService.events.stream.listen((event) {
       _events.insert(0, event);
       if (_events.length > 100) _events.removeLast();
       notifyListeners();

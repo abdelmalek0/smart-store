@@ -96,19 +96,17 @@ class PeopleCountingPlugin extends SmartStorePlugin {
     final requestId = result['requestId'] as int;
     final frame = getPendingFrame(requestId);
 
-    if (frame != null) {
-      // Determine processing time
-      final processingStartMs = result['processingStartMs'] as int? ?? 0;
-      final inferenceEndMs = DateTime.now().millisecondsSinceEpoch;
+    // Determine processing time
+    final processingStartMs = result['processingStartMs'] as int? ?? 0;
+    final inferenceEndMs = DateTime.now().millisecondsSinceEpoch;
 
-      emitDisplayFrame(frame, personDetections, {
-        'decode':
-            0, // lost this info unless we passed it through requestInference->result meta
-        'inference': (processingStartMs > 0)
-            ? (inferenceEndMs - processingStartMs)
-            : 0,
-        'postprocess': 0,
-      });
-    }
+    emitDisplayFrame(frame, personDetections, {
+      'decode':
+          0, // lost this info unless we passed it through requestInference->result meta
+      'inference': (processingStartMs > 0)
+          ? (inferenceEndMs - processingStartMs)
+          : 0,
+      'postprocess': 0,
+    });
   }
 }

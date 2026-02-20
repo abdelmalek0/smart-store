@@ -1,18 +1,22 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
-import 'package:smart_store_linux/ui/providers/app_provider.dart';
+import 'package:smart_store_linux/core/services/app/app_service.dart';
 
 class AndroidResourceMonitor {
-  static const MethodChannel _channel = MethodChannel('ffmpeg_video');
+  static const MethodChannel _channel = MethodChannel(
+    'smart_store_linux/video_bridge',
+  );
 
-  final AppProvider _provider;
   Timer? _timer;
 
-  AndroidResourceMonitor(this._provider);
+  AndroidResourceMonitor();
 
   void start() {
-    _provider.updateHardwareInfo("Rockchip RK3588", "NPU (RKNN)");
+    AppService.instance.system.updateHardwareInfo(
+      "Rockchip RK3588",
+      "NPU (RKNN)",
+    );
     _fetchStats(); // Initial fetch
     _timer = Timer.periodic(const Duration(seconds: 2), (_) => _fetchStats());
   }
@@ -37,7 +41,7 @@ class AndroidResourceMonitor {
         // Use simulated CPU if native returns 0 (common on modern Android)
         final displayCpu = cpuLoad > 0 ? cpuLoad : _simulateCpu();
 
-        _provider.updateStats(
+        AppService.instance.system.updateStats(
           cpu: displayCpu,
           ram: ramUsed,
           ramTotal: ramTotal,

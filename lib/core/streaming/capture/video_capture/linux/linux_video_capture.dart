@@ -291,6 +291,20 @@ class LinuxOptimizedFrame extends VideoCaptureFrame {
           det.classId.toDouble(),
         ];
       }).toList();
+
+      // Debug: Log detections every 60 frames
+      if (detections.isNotEmpty && timestamp % 2000 < 100) {
+        debugPrint(
+          "🎯 Model Output: ${detections.length} detections at timestamp $timestamp",
+        );
+        for (var i = 0; i < detections.length && i < 3; i++) {
+          debugPrint(
+            "   Detection $i: bbox=[${detections[i][0].toStringAsFixed(1)}, ${detections[i][1].toStringAsFixed(1)}, "
+            "${detections[i][2].toStringAsFixed(1)}, ${detections[i][3].toStringAsFixed(1)}], "
+            "conf=${(detections[i][4] * 100).toStringAsFixed(1)}%, class=${detections[i][5].toInt()}",
+          );
+        }
+      }
     }
 
     return LinuxOptimizedFrame(

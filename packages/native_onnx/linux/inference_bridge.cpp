@@ -124,7 +124,8 @@ int Video_GetFrameAndInfer(
 
     // 1. Get Frame
     int64_t timestamp = 0;
-    int ret = VideoManager::GetFrame(video_id, out_frame_buffer, out_width, out_height, &timestamp);
+    // Get frame WITHOUT adding to texture buffer (we'll add after inference)
+    int ret = VideoManager::GetFrame(video_id, out_frame_buffer, out_width, out_height, &timestamp, false);
     if (ret != 0) return ret; 
     
     if (out_timestamp) *out_timestamp = timestamp;
@@ -187,6 +188,16 @@ int Video_GetFrameAndInfer(
                     gpu_infer_count++;
                 }
                 
+                // CRITICAL: Add frame to texture buffer AFTER successful inference
+                if (video_ctx->texture_manager_id > 0 || video_ctx->texture_id > 0) {
+                    int tex_id = video_ctx->texture_manager_id > 0 ? video_ctx->texture_manager_id : video_ctx->texture_id;
+                    std::cout << "[INFERENCE-BRIDGE] Adding frame " << timestamp << " to texture buffer (GPU path)" << std::endl;
+                    texture_manager::TextureManager::getInstance().setPendingGpuFrame(tex_id, video_ctx->last_rgba_gpu, timestamp);
+                    std::cout << "[INFERENCE-BRIDGE] Frame " << timestamp << " added successfully, returning to Dart" << std::endl;
+                } else {
+                    std::cerr << "[INFERENCE-BRIDGE] ERROR: No texture ID configured for frame " << timestamp << std::endl;
+                }
+                
                 return 0;
                 
             } catch (const std::exception& e) {
@@ -241,7 +252,17 @@ int Video_GetFrameAndInfer(
         auto end_time = std::chrono::high_resolution_clock::now();
         std::chrono::duration<float, std::milli> duration = end_time - start_time;
         if (out_inference_time) *out_inference_time = duration.count();
-        
+                
+        // CRITICAL: Add frame to texture buffer AFTER successful inference
+        if (video_ctx->texture_manager_id > 0 || video_ctx->texture_id > 0) {
+            int tex_id = video_ctx->texture_manager_id > 0 ? video_ctx->texture_manager_id : video_ctx->texture_id;
+            std::cout << "[INFERENCE-BRIDGE] Adding frame " << timestamp << " to texture buffer (CPU path)" << std::endl;
+            texture_manager::TextureManager::getInstance().setPendingGpuFrame(tex_id, video_ctx->last_rgba_gpu, timestamp);
+            std::cout << "[INFERENCE-BRIDGE] Frame " << timestamp << " added successfully, returning to Dart" << std::endl;
+        } else {
+            std::cerr << "[INFERENCE-BRIDGE] ERROR: No texture ID configured for frame " << timestamp << std::endl;
+        }
+                
         return 0;
 
     } catch (const std::exception& e) {
@@ -297,7 +318,11 @@ TEXTURE_EXPORT int Texture_ShowFrame(int texture_id, int64_t timestamp) {
     if (texture_manager::TextureManager::getInstance().showFrame(texture_id, timestamp)) {
         return 0;
     }
-    return -1;
+    return texture_manager::TextureManager::getInstance().showFrame(texture_id, timestamp) ? 0 : -1;
+}
+
+TEXTURE_EXPORT void Texture_Dispose(int texture_id) {
+    texture_manager::TextureManager::getInstance().releaseTexture(texture_id);
 }
 
 } // extern "C"

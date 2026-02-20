@@ -8,7 +8,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
-import 'package:smart_store_linux/core/streaming/video_bridge/video_bridge.dart';
+import 'package:smart_store_linux/core/streaming/video_bridge.dart';
 
 import '../video_capture.dart';
 

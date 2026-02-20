@@ -72,7 +72,7 @@ class RknnInferenceBackend extends InferenceBackend {
 
     if (handle == null || currentRes != targetRes) {
       debugPrint(
-        "RknnBackend: Initializing model for stream $streamId (${w}x${h})",
+        "RknnBackend: Initializing model for stream $streamId (${w}x$h)",
       );
 
       if (handle != null) {

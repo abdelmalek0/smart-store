@@ -10,7 +10,7 @@ class NativeOrtRunOptions {
 
 /// ONNX Runtime session
 class NativeOrtSession {
-  late int _id;
+  final int _id;
   final NativeInferenceService _service = NativeInferenceService();
   bool _released = false;
 

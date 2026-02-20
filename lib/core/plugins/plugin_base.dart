@@ -107,7 +107,7 @@ abstract class SmartStorePlugin {
   /// Emit a processed frame for display
   /// [detections]: List of detections to overlay
   void emitDisplayFrame(
-    RawFrame frame,
+    RawFrame? frame,
     List<dynamic> detections,
     Map<String, int> timing,
   ) {
@@ -115,10 +115,13 @@ abstract class SmartStorePlugin {
       'type': 'emit_display_frame',
       'streamId': _streamId,
       // optimized: send detection data, original frame might be cached on host or we send it back
-      'frame': TransferableTypedData.fromList([frame.bytes]),
-      'width': frame.width,
-      'height': frame.height,
-      'timestamp': frame.decodeTimestamp,
+      'frame': frame != null
+          ? TransferableTypedData.fromList([frame.bytes])
+          : null,
+      'width': frame?.width ?? 0,
+      'height': frame?.height ?? 0,
+      'timestamp': frame?.decodeTimestamp ?? timing['decode'] ?? 0,
+      'generationTimeMs': frame?.generationTimeMs ?? 0,
       'detections': detections,
       'timing': timing,
     });

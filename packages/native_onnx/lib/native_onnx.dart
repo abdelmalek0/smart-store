@@ -7,7 +7,7 @@
 /// - [NativeOrtSession] - ONNX runtime session
 /// - [NativeOrtValueTensor] - Tensor value wrapper
 /// - [NativeOrtRunOptions] - Runtime options
-library native_onnx;
+library;
 
 // Export public API
 export 'src/native_inference_service.dart';

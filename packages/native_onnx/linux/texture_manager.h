@@ -40,11 +40,99 @@ struct TextureInfo {
     bool has_pending_gpu_frame = false;
     std::unique_ptr<std::mutex> frame_mutex;
     
-    TextureInfo() : frame_mutex(std::make_unique<std::mutex>()) {}
-    
     // Frame Buffer for Strict Synchronization
     // Stores decoded frames by timestamp until showFrame() is called
     std::map<int64_t, cv::cuda::GpuMat> frame_buffer;
+    std::unique_ptr<std::mutex> buffer_mutex; // Pointer to allow TextureInfo to be movable
+    int64_t latest_timestamp = -1; // Track the latest timestamp added to the buffer
+    
+    TextureInfo() 
+        : frame_mutex(std::make_unique<std::mutex>()),
+          buffer_mutex(std::make_unique<std::mutex>()) {}
+    
+    // Explicit move constructor
+    TextureInfo(TextureInfo&& other) noexcept 
+        : gl_texture_id(other.gl_texture_id),
+          width(other.width), height(other.height), 
+          gl_width(other.gl_width), gl_height(other.gl_height),
+          cuda_resource(other.cuda_resource),
+          interop_registered(other.interop_registered),
+          interop_attempted(other.interop_attempted),
+          pbo_id(other.pbo_id),
+          pbo_cuda_resource(other.pbo_cuda_resource),
+          pbo_registered(other.pbo_registered),
+          use_pbo_path(other.use_pbo_path),
+          has_valid_frame(other.has_valid_frame),
+          pending_gpu_frame(std::move(other.pending_gpu_frame)),
+          has_pending_gpu_frame(other.has_pending_gpu_frame),
+          frame_mutex(std::move(other.frame_mutex)),
+          frame_buffer(std::move(other.frame_buffer)),
+          buffer_mutex(std::move(other.buffer_mutex)),
+          latest_timestamp(other.latest_timestamp),
+          auto_play(other.auto_play) 
+    {
+        // Reset other's resources to prevent double-free/invalid state
+        other.gl_texture_id = 0;
+        other.cuda_resource = nullptr;
+        other.pbo_id = 0;
+        other.pbo_cuda_resource = nullptr;
+    }
+
+    // Explicit move assignment
+    TextureInfo& operator=(TextureInfo&& other) noexcept {
+        if (this != &other) {
+            // Release current resources if any
+            // (e.g., GL texture, CUDA resources - though these are typically managed externally or by releaseTexture)
+            
+            gl_texture_id = other.gl_texture_id;
+            width = other.width;
+            height = other.height;
+            gl_width = other.gl_width;
+            gl_height = other.gl_height;
+            cuda_resource = other.cuda_resource;
+            interop_registered = other.interop_registered;
+            interop_attempted = other.interop_attempted;
+            pbo_id = other.pbo_id;
+            pbo_cuda_resource = other.pbo_cuda_resource;
+            pbo_registered = other.pbo_registered;
+            use_pbo_path = other.use_pbo_path;
+            has_valid_frame = other.has_valid_frame;
+            pending_gpu_frame = std::move(other.pending_gpu_frame);
+            has_pending_gpu_frame = other.has_pending_gpu_frame;
+            frame_mutex = std::move(other.frame_mutex);
+            frame_buffer = std::move(other.frame_buffer);
+            buffer_mutex = std::move(other.buffer_mutex);
+            latest_timestamp = other.latest_timestamp;
+            auto_play = other.auto_play;
+
+            // Reset other's resources to prevent double-free/invalid state
+            other.gl_texture_id = 0;
+            other.cuda_resource = nullptr;
+            other.pbo_id = 0;
+            other.pbo_cuda_resource = nullptr;
+            other.interop_registered = false;
+            other.pbo_registered = false;
+        }
+        return *this;
+    }
+
+    void resetBuffer() {
+        if (buffer_mutex) {
+            std::lock_guard<std::mutex> lock(*buffer_mutex);
+            frame_buffer.clear();
+            latest_timestamp = -1;
+        }
+    }
+    
+    bool addFrame(int64_t timestamp, const cv::cuda::GpuMat& frame) {
+        if (!buffer_mutex) return false;
+        std::lock_guard<std::mutex> lock(*buffer_mutex);
+        frame_buffer[timestamp] = frame;
+        if (timestamp > latest_timestamp) {
+            latest_timestamp = timestamp;
+        }
+        return true;
+    }
     
     // Auto-play mode (display immediately) until first showFrame call
     bool auto_play = true;

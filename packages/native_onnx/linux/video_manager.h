@@ -27,6 +27,7 @@ struct VideoContext {
     std::chrono::time_point<std::chrono::steady_clock> start_time;
     bool first_frame_read = false;
     int64_t start_pts = 0;
+    int64_t last_timestamp = 0;
 
 #ifdef USE_FFMPEG_NVDEC
     // FFmpeg structures for hardware decoding
@@ -76,7 +77,7 @@ class VideoManager {
 public:
     static int64_t Open(const char* url);
     static void Release(int64_t video_id);
-    static int GetFrame(int64_t video_id, uint8_t** out_buffer, int* width, int* height, int64_t* out_timestamp);
+    static int GetFrame(int64_t video_id, uint8_t** out_buffer, int* width, int* height, int64_t* out_timestamp, bool add_to_texture_buffer = true);
     
     // Helper to access context securely for inference bridge internal use
     static std::shared_ptr<VideoContext> GetContext(int64_t video_id);

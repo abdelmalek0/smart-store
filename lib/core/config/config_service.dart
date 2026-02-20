@@ -1,224 +1,181 @@
-import 'dart:convert';
-import 'dart:io';
+import 'package:flutter/material.dart';
+import 'package:smart_store_linux/core/plugins/models/plugin_info.dart';
+import 'package:smart_store_linux/core/config/models/app_config.dart';
+import 'package:smart_store_linux/core/config/models/stream_config.dart';
+import 'package:smart_store_linux/core/config/models/plugin_config.dart';
+import 'package:smart_store_linux/core/config/models/model_config.dart';
+import 'package:smart_store_linux/data/repositories/config_repository.dart';
 
-import 'package:flutter/foundation.dart';
-import 'package:path_provider/path_provider.dart';
-
-/// Service for persisting configuration across app restarts
-class ConfigService {
+/// Service for managing application configuration.
+///
+/// Acts as a central source of truth for Streams, Plugins, and Models configuration.
+class ConfigService extends ChangeNotifier {
   static final ConfigService _instance = ConfigService._internal();
   factory ConfigService() => _instance;
   static ConfigService get instance => _instance;
 
   ConfigService._internal();
 
-  Map<String, dynamic> _config = {};
+  final ConfigRepository _repository = ConfigRepository();
+  AppConfig _config = const AppConfig();
+
   bool _isInitialized = false;
+
+  /// Get the current application configuration.
+  AppConfig get config => _config;
 
   Future<void> init() async {
     if (_isInitialized) return;
-    await _loadConfig();
+    _config = await _repository.loadConfig();
     _isInitialized = true;
+    notifyListeners();
   }
 
-  Future<File> get _file async {
-    final directory = await getApplicationDocumentsDirectory();
-    return File('${directory.path}/smart_store_config.json');
+  // --- Main Config Updates ---
+
+  Future<void> updateConfig(AppConfig newConfig) async {
+    _config = newConfig;
+    await _repository.saveConfig(_config);
+    notifyListeners();
   }
 
-  Future<void> _loadConfig() async {
+  // --- Stream Management ---
+
+  List<StreamConfig> get streams => _config.streams;
+
+  Future<void> addStream(StreamConfig stream) async {
+    final newStreams = List<StreamConfig>.from(_config.streams)..add(stream);
+    await updateConfig(_config.copyWith(streams: newStreams));
+  }
+
+  Future<void> removeStream(String streamId) async {
+    final newStreams = _config.streams.where((s) => s.id != streamId).toList();
+    await updateConfig(_config.copyWith(streams: newStreams));
+  }
+
+  Future<void> updateStream(StreamConfig stream) async {
+    final index = _config.streams.indexWhere((s) => s.id == stream.id);
+    if (index != -1) {
+      final newStreams = List<StreamConfig>.from(_config.streams);
+      newStreams[index] = stream;
+      await updateConfig(_config.copyWith(streams: newStreams));
+    }
+  }
+
+  StreamConfig? getStream(String streamId) {
     try {
-      final file = await _file;
-      if (await file.exists()) {
-        final content = await file.readAsString();
-        _config = jsonDecode(content);
-      }
-    } catch (e) {
-      debugPrint("Error loading config: $e");
-      _config = {};
+      return _config.streams.firstWhere((s) => s.id == streamId);
+    } catch (_) {
+      return null;
     }
   }
 
-  Future<void> _saveConfig() async {
+  // --- Plugin Management ---
+
+  List<PluginConfig> get plugins => _config.plugins;
+
+  Future<void> updatePlugin(PluginConfig plugin) async {
+    final index = _config.plugins.indexWhere((p) => p.id == plugin.id);
+    List<PluginConfig> newPlugins;
+    if (index != -1) {
+      newPlugins = List<PluginConfig>.from(_config.plugins);
+      newPlugins[index] = plugin;
+    } else {
+      newPlugins = List<PluginConfig>.from(_config.plugins)..add(plugin);
+    }
+    await updateConfig(_config.copyWith(plugins: newPlugins));
+  }
+
+  PluginConfig? getPlugin(String pluginId) {
     try {
-      final file = await _file;
-      await file.writeAsString(jsonEncode(_config));
-    } catch (e) {
-      debugPrint("Error saving config: $e");
+      return _config.plugins.firstWhere((p) => p.id == pluginId);
+    } catch (_) {
+      return null;
     }
   }
 
-  // --- Specialized Methods ---
+  // --- Model Management ---
 
-  /// Get all stream-to-model mappings
-  Map<String, String> getAllStreamMappings() {
-    final Map<String, String> mappings = {};
-    if (!_config.containsKey('streams')) return mappings;
+  List<ModelConfig> get models => _config.models;
 
-    final streams = _config['streams'] as Map<String, dynamic>;
-    streams.forEach((streamId, data) {
-      if (data is Map) {
-        // 1. Check Active Plugin config
-        final activePluginId = data['activePluginId'] ?? 'people_counting';
-        if (data.containsKey('plugins')) {
-          final plugins = data['plugins'] as Map<String, dynamic>;
-          if (plugins.containsKey(activePluginId)) {
-            final pluginConfig =
-                plugins[activePluginId] as Map<String, dynamic>;
-            if (pluginConfig.containsKey('modelPath')) {
-              final path = pluginConfig['modelPath'];
-              if (path is String && path.isNotEmpty) {
-                mappings[streamId] = path;
-                return;
-              }
-            }
-          }
-        }
-
-        // 2. Fallback: Legacy stream-level modelPath
-        if (data.containsKey('modelPath')) {
-          final modelPath = data['modelPath'];
-          if (modelPath != null && modelPath is String) {
-            mappings[streamId] = modelPath;
-          }
-        }
-      }
-    });
-
-    return mappings;
+  Future<void> addModel(ModelConfig model) async {
+    final newModels = List<ModelConfig>.from(_config.models)..add(model);
+    await updateConfig(_config.copyWith(models: newModels));
   }
 
-  String? getModelForStream(String streamId) {
-    if (!_config.containsKey('streams')) return null;
-    final streams = _config['streams'] as Map<String, dynamic>;
-    if (!streams.containsKey(streamId)) return null;
-
-    final streamData = streams[streamId] as Map<String, dynamic>;
-    final activePluginId = streamData['activePluginId'] ?? 'people_counting';
-
-    // 1. Try Active Plugin Config
-    if (streamData.containsKey('plugins')) {
-      final plugins = streamData['plugins'] as Map<String, dynamic>;
-      if (plugins.containsKey(activePluginId)) {
-        final pluginConfig = plugins[activePluginId] as Map<String, dynamic>;
-        return pluginConfig['modelPath'] as String?;
-      }
-    }
-
-    // 2. Fallback: Legacy
-    return streamData['modelPath'] as String?;
+  Future<void> removeModel(String modelId) async {
+    final newModels = _config.models.where((m) => m.id != modelId).toList();
+    await updateConfig(_config.copyWith(models: newModels));
   }
 
-  Future<void> setModelForStream(String streamId, String? modelPath) async {
-    // 1. Get Active Plugin (default to people_counting if not set)
-    final currentPlugin = getStreamActivePlugin(streamId) ?? 'people_counting';
-
-    // 2. Get existing config to preserve other settings
-    final existingConfig = getPluginConfig(streamId, currentPlugin) ?? {};
-
-    // 3. Update model path
-    if (modelPath == null) {
-      existingConfig.remove('modelPath');
-    } else {
-      existingConfig['modelPath'] = modelPath;
+  Future<void> updateModel(ModelConfig model) async {
+    final index = _config.models.indexWhere((m) => m.id == model.id);
+    if (index != -1) {
+      final newModels = List<ModelConfig>.from(_config.models);
+      newModels[index] = model;
+      await updateConfig(_config.copyWith(models: newModels));
     }
-
-    // 4. Save back to plugin config
-    await setPluginConfig(streamId, currentPlugin, existingConfig);
   }
 
-  /// Get Global configuration for a plugin
-  Map<String, dynamic>? getGlobalPluginConfig(String pluginId) {
-    if (!_config.containsKey('plugins')) return null;
-    final plugins = _config['plugins'] as Map<String, dynamic>;
-    return plugins[pluginId] as Map<String, dynamic>?;
+  ModelConfig? getModel(String modelId) {
+    try {
+      return _config.models.firstWhere((m) => m.id == modelId);
+    } catch (_) {
+      return null;
+    }
   }
 
-  /// Set Global configuration for a plugin
-  Future<void> setGlobalPluginConfig(
-    String pluginId,
-    Map<String, dynamic> config,
-  ) async {
-    if (!_config.containsKey('plugins')) {
-      _config['plugins'] = <String, dynamic>{};
+  // --- Helper for backwards compatibility / ease of use ---
+
+  /// Resolve the model path for a given plugin assignment.
+  String? getModelPathForPlugin(String pluginId) {
+    final pluginConfig = getPlugin(pluginId);
+    if (pluginConfig?.assignedModelId != null) {
+      final model = getModel(pluginConfig!.assignedModelId!);
+      return model?.path;
     }
-    final plugins = _config['plugins'] as Map<String, dynamic>;
-    plugins[pluginId] = config;
-    await _saveConfig();
+    return null;
   }
 
-  /// Set Active Plugin for a stream
-  Future<void> setStreamActivePlugin(String streamId, String? pluginId) async {
-    if (!_config.containsKey('streams')) {
-      _config['streams'] = <String, dynamic>{};
-    }
-    final streams = _config['streams'] as Map<String, dynamic>;
+  /// Resolve effective model path for a stream (based on override or active plugin)
+  String? getEffectiveModelPathForStream(String streamId) {
+    final stream = getStream(streamId);
+    if (stream == null) return null;
 
-    // Initialize stream data if needed
-    if (!streams.containsKey(streamId)) {
-      if (pluginId == null) return; // Nothing to set
-      streams[streamId] = <String, dynamic>{};
+    // 1. Check Stream Override
+    if (stream.assignedModelId != null) {
+      return getModel(stream.assignedModelId!)?.path;
     }
 
-    final streamData = streams[streamId] as Map<String, dynamic>;
-
-    if (pluginId == null) {
-      streamData.remove('activePluginId');
-    } else {
-      streamData['activePluginId'] = pluginId;
+    // 2. Check Plugin Default
+    if (stream.activePluginId != null) {
+      return getModelPathForPlugin(stream.activePluginId!);
     }
-
-    await _saveConfig();
+    return null;
   }
 
-  /// Get Active Plugin ID for a stream
-  String? getStreamActivePlugin(String streamId) {
-    if (!_config.containsKey('streams')) return null;
-    final streams = _config['streams'] as Map<String, dynamic>;
-    if (!streams.containsKey(streamId)) return null;
+  // --- Static Plugin Definitions ---
 
-    final streamData = streams[streamId] as Map<String, dynamic>;
-    return streamData['activePluginId'] as String?;
-  }
-
-  /// Get configuration for a specific plugin on a stream
-  Map<String, dynamic>? getPluginConfig(String streamId, String pluginId) {
-    if (!_config.containsKey('streams')) return null;
-    final streams = _config['streams'] as Map<String, dynamic>;
-    if (!streams.containsKey(streamId)) return null;
-
-    final streamData = streams[streamId] as Map<String, dynamic>;
-    if (!streamData.containsKey('plugins')) return null;
-
-    final plugins = streamData['plugins'] as Map<String, dynamic>;
-    return plugins[pluginId] as Map<String, dynamic>?;
-  }
-
-  /// Set configuration for a plugin
-  Future<void> setPluginConfig(
-    String streamId,
-    String pluginId,
-    Map<String, dynamic> config,
-  ) async {
-    if (!_config.containsKey('streams')) {
-      _config['streams'] = <String, dynamic>{};
-    }
-    final streams = _config['streams'] as Map<String, dynamic>;
-
-    if (!streams.containsKey(streamId)) {
-      streams[streamId] = <String, dynamic>{'plugins': <String, dynamic>{}};
-    }
-
-    final streamData = streams[streamId] as Map<String, dynamic>;
-    if (!streamData.containsKey('plugins')) {
-      streamData['plugins'] = <String, dynamic>{};
-    }
-
-    final plugins = streamData['plugins'] as Map<String, dynamic>;
-
-    // Merge or overwrite? Overwrite for now.
-    plugins[pluginId] = config;
-
-    await _saveConfig();
-  }
+  List<PluginInfo> get availablePlugins => const [
+    PluginInfo(
+      id: 'people_counting',
+      name: 'People Counting',
+      description: 'Initializes YOLO model to count people.',
+      icon: Icons.people_alt_rounded,
+      isActive: true,
+      defaultConfig: {'personClassId': 0, 'confidenceThreshold': 0.5},
+    ),
+    PluginInfo(
+      id: 'kitchen_supervision',
+      name: 'Kitchen Supervision',
+      description: 'Detects bare hands (no gloves) for 5 seconds.',
+      icon: Icons.restaurant_rounded,
+      isActive: true,
+      defaultConfig: {
+        'handClassId': 4,
+        'gloveClassId': 0,
+        'confidenceThreshold': 0.5,
+      },
+    ),
+  ];
 }

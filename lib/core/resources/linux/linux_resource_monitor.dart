@@ -1,17 +1,16 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
-import 'package:smart_store_linux/ui/providers/app_provider.dart';
+import 'package:smart_store_linux/core/services/app/app_service.dart';
 
 class LinuxResourceMonitor {
-  final AppProvider _provider;
   Timer? _timer;
 
   // Cache for CPU calculation
   int _prevTotal = 0;
   int _prevIdle = 0;
 
-  LinuxResourceMonitor(this._provider);
+  LinuxResourceMonitor();
 
   void start() {
     _fetchHardwareNames();
@@ -77,7 +76,7 @@ class LinuxResourceMonitor {
       debugPrint("Error detecting GPU: $e");
     }
 
-    _provider.updateHardwareInfo(cpu, gpu);
+    AppService.instance.system.updateHardwareInfo(cpu, gpu);
   }
 
   Future<void> _fetchStats() async {
@@ -164,7 +163,7 @@ class LinuxResourceMonitor {
       // GPU monitor might fail if nvidia-smi not present
     }
 
-    _provider.updateStats(
+    AppService.instance.system.updateStats(
       cpu: cpuUsage,
       ram: ramUsage,
       ramTotal: ramTotal,

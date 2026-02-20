@@ -149,6 +149,7 @@ extern "C" void Video_SetTextureManagerId(long long session_id, int texture_mana
 extern "C" int Texture_Create(int width, int height); 
 extern "C" uint32_t Texture_GetGLHandle(int texture_id);
 extern "C" int Texture_ShowFrame(int texture_id, int64_t timestamp);
+extern "C" void Texture_Dispose(int texture_id);
 
 // Handle method calls from Dart
 static void handle_texture_method_call(FlMethodChannel* channel,
@@ -251,9 +252,29 @@ static void handle_texture_method_call(FlMethodChannel* channel,
     // Call into native_onnx to set mapping
     Video_SetTextureManagerId(video_id, texture_manager_id);
     
-    g_autoptr(FlMethodResponse) response = FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
-    fl_method_call_respond(method_call, response, nullptr);
+    g_autoptr(FlMethodResponse) connect_response = FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
+    fl_method_call_respond(method_call, connect_response, nullptr);
     return;
+  }
+
+  if (strcmp(method, "disposeTexture") == 0) {
+      FlValue* args = fl_method_call_get_args(method_call);
+      int64_t texture_id = fl_value_get_int(fl_value_lookup_string(args, "textureId"));
+      int64_t tex_mgr_id = fl_value_get_int(fl_value_lookup_string(args, "textureManagerId"));
+      
+      {
+           std::lock_guard<std::mutex> lock(g_texture_map_mutex);
+           g_texture_objects.erase(texture_id);
+      }
+      
+      if (tex_mgr_id > 0) {
+          Texture_Dispose((int)tex_mgr_id);
+          g_print("[TEXTURE-CHANNEL] Disposed texture manager ID %ld\n", tex_mgr_id);
+      }
+
+      g_autoptr(FlMethodResponse) dispose_response = FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
+      fl_method_call_respond(method_call, dispose_response, nullptr);
+      return;
   }
   
   g_autoptr(FlMethodResponse) response = FL_METHOD_RESPONSE(fl_method_not_implemented_response_new());

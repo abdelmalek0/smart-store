@@ -15,10 +15,16 @@ class RawFrame {
   final Uint8List bytes;
   final int width;
   final int height;
-  final int
-  decodeTimestamp; // When frame was decoded (milliseconds since epoch)
+  final int decodeTimestamp; // Video timestamp (0-based)
+  final int generationTimeMs; // System timestamp of capture
 
-  RawFrame(this.bytes, this.width, this.height, this.decodeTimestamp);
+  RawFrame(
+    this.bytes,
+    this.width,
+    this.height,
+    this.decodeTimestamp, {
+    this.generationTimeMs = 0,
+  });
 }
 
 /// Processed frame with inference detections and pipeline timestamps
@@ -29,7 +35,8 @@ class ProcessedFrame {
   final List<dynamic> detections;
 
   // Pipeline timestamps (milliseconds since epoch)
-  final int decodeStartMs; // When frame decode started
+  final int decodeStartMs; // Video timestamp
+  final int generationTimeMs; // System timestamp of capture
   final int preprocessEndMs; // When preprocessing finished
   final int inferenceEndMs; // When inference finished
   final int postprocessEndMs; // When post-processing finished
@@ -40,6 +47,7 @@ class ProcessedFrame {
     required this.height,
     required this.detections,
     required this.decodeStartMs,
+    this.generationTimeMs = 0,
     required this.preprocessEndMs,
     required this.inferenceEndMs,
     required this.postprocessEndMs,

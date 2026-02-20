@@ -6,7 +6,7 @@ enum ModelType { classifier, yolo }
 /// Standardized output for inference
 /// Wraps the raw results which might differ by platform/model
 class InferenceResult {
-  /// Raw output buffers (e.g. List<float> or List<int>)
+  /// Raw output buffers (e.g. `List<float>` or `List<int>`)
   final List<List<dynamic>> outputs;
 
   /// Metadata helpful for post-processing (e.g. quantization params for RKNN)

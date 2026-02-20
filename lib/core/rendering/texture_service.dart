@@ -51,4 +51,19 @@ class TextureService {
       debugPrint('[TextureService] Failed to connect stream: $e');
     }
   }
+
+  /// Dispose a texture and release native resources
+  Future<void> disposeTexture(int textureId, int textureManagerId) async {
+    try {
+      await _channel.invokeMethod('disposeTexture', {
+        'textureId': textureId,
+        'textureManagerId': textureManagerId,
+      });
+      debugPrint(
+        '[TextureService] Disposed texture T$textureId (Mgr: $textureManagerId)',
+      );
+    } catch (e) {
+      debugPrint('[TextureService] Failed to dispose texture: $e');
+    }
+  }
 }
