@@ -5,11 +5,14 @@ import 'package:flutter/foundation.dart';
 import 'package:smart_store_linux/core/config/constants.dart';
 import 'package:smart_store_linux/core/models/frames.dart';
 import 'package:smart_store_linux/core/streaming/stream_manager.dart';
-import 'package:smart_store_linux/core/streaming/video_bridge.dart';
+import 'package:smart_store_linux/core/streaming/bridge/video_bridge.dart';
 
 /// Manages the display queue, backpressure, and frame broadcasting.
 class DisplayQueue {
   final String streamId;
+
+  // Platform-specific bridge for native frame flushing
+  final VideoBridge _bridge = VideoBridge();
 
   // Configuration
   static const int displayQueueMaxSize = Constants.displayQueueMaxSize;
@@ -67,16 +70,10 @@ class DisplayQueue {
             // But DisplayQueue is in `core/rendering/queue`.
             // Ideally we use VideoBridge directly if we knew the Texture ID.
 
-            // Getting Texture ID from StreamManager:
-            // We need to import StreamManager.
             try {
-              // We need a way to get the TextureID.
-              // DisplayQueue has `streamId`.
-              // We can use StreamManager singleton.
-              // Note: This adds a dependency on StreamManager.
               final tid = StreamManager.instance.getTextureId(streamId);
               if (tid != null) {
-                VideoBridge.showFrame(tid, frameToDisplay.decodeStartMs);
+                _bridge.showFrame(tid, frameToDisplay.decodeStartMs);
               }
             } catch (e) {
               // Ignore

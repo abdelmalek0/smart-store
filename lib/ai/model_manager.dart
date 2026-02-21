@@ -1,8 +1,9 @@
 import 'dart:async';
-import 'package:flutter/foundation.dart';
-import 'package:smart_store_linux/ai/registry/model_registry.dart';
-import 'package:smart_store_linux/ai/model_runtime.dart';
-import 'package:smart_store_linux/ai/models/inference_result.dart';
+import 'dart:developer';
+import 'dart:typed_data';
+import 'package:smart_store_linux/features/inference/registry/model_registry.dart';
+import 'package:smart_store_linux/features/inference/inference_runtime.dart';
+import 'package:smart_store_linux/features/inference/models/inference_result.dart';
 import 'package:smart_store_linux/core/config/models/model_config.dart';
 
 /// Active Orchestrator for Models.
@@ -38,12 +39,12 @@ class ModelManager {
     required int height,
   }) async {
     // 1. Get or Create Runtime
-    ModelRuntime? runtime = ModelRegistry.instance.getRuntime(modelPath);
+    InferenceRuntime? runtime = InferenceRegistry.instance.getRuntime(modelPath);
 
     if (runtime == null) {
       try {
-        debugPrint("[ModelManager] Initializing runtime for $modelPath");
-        runtime = ModelRuntime(modelPath);
+        log('[ModelManager] Initializing runtime for $modelPath');
+        runtime = InferenceRuntime(modelPath);
 
         // Pipe results to global stream
         runtime.resultsStream.listen((result) {
@@ -51,11 +52,9 @@ class ModelManager {
         });
 
         await runtime.init();
-        ModelRegistry.instance.registerRuntime(modelPath, runtime);
+        InferenceRegistry.instance.registerRuntime(modelPath, runtime);
       } catch (e) {
-        debugPrint(
-          "❌ [ModelManager] Failed to initialize runtime for $modelPath: $e",
-        );
+        log('❌ [ModelManager] Failed to initialize runtime for $modelPath: $e');
         return;
       }
     }
@@ -66,13 +65,13 @@ class ModelManager {
 
   /// Release all resources
   Future<void> release() async {
-    debugPrint("[ModelManager] Releasing all runtimes...");
-    final runtimes = ModelRegistry.instance.runtimes;
+    log('[ModelManager] Releasing all runtimes...');
+    final runtimes = InferenceRegistry.instance.runtimes;
     for (var runtime in runtimes) {
-      if (runtime is ModelRuntime) {
+      if (runtime is InferenceRuntime) {
         await runtime.dispose();
       }
     }
-    ModelRegistry.instance.clear();
+    InferenceRegistry.instance.clear();
   }
 }

@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:smart_store_linux/core/config/models/stream_config.dart';
-import 'package:smart_store_linux/core/engine/pipeline_manager.dart';
+import 'package:smart_store_linux/features/engine/engine_orchestrator.dart';
 
 class CameraSidebar extends StatefulWidget {
   final List<StreamConfig> streams;
   final String? selectedStreamId;
   final Function(String) onStreamSelected;
   final bool isOpen;
-  final PipelineManager? processManager;
+  final EngineOrchestrator? processManager;
 
   const CameraSidebar({
     super.key,

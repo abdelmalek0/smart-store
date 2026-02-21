@@ -2,7 +2,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:smart_store_linux/core/models/frames.dart';
 import 'package:smart_store_linux/core/rendering/queue/display_queue.dart';
-import 'package:smart_store_linux/core/streaming/video_bridge.dart'; // Added
+import 'package:smart_store_linux/core/streaming/bridge/video_bridge.dart';
 
 /// Manages rendering resources and display queues for all streams.
 ///
@@ -14,6 +14,10 @@ class RenderingManager {
   static final RenderingManager _instance = RenderingManager._internal();
   factory RenderingManager() => _instance;
   static RenderingManager get instance => _instance;
+
+  // Platform-specific video bridge (created once via factory)
+  final VideoBridge _bridge = VideoBridge();
+
   RenderingManager._internal();
 
   // Active Display Queues: Map<StreamId, DisplayQueue>
@@ -113,10 +117,10 @@ class RenderingManager {
     }
   }
 
-  /// Show a frame on the native display (proxy to runtime/native)
+  /// Show a frame on the native display (proxy to platform bridge)
   Future<bool> showFrame(int nativeVideoId, int timestamp) async {
     if (nativeVideoId > 0) {
-      return await VideoBridge.showFrame(nativeVideoId, timestamp);
+      return await _bridge.showFrame(nativeVideoId, timestamp);
     }
     return false;
   }

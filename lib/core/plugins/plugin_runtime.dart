@@ -11,18 +11,26 @@ import 'package:smart_store_linux/core/plugins/impl/kitchen_supervision_plugin.d
 import 'package:smart_store_linux/core/events/events.dart';
 import 'package:smart_store_linux/core/events/event_service.dart';
 
-/// Top-level entry point for Plugin Isolates
+/// Factory function type for creating plugin instances.
+typedef PluginFactory = SmartStorePlugin Function();
+
+/// Registry of available plugin factories.
+///
+/// To add a new plugin type: add one entry to this map with its plugin ID key.
+/// No other code changes required.
+final Map<String, PluginFactory> _pluginFactories = {
+  'people_counting': () => PeopleCountingPlugin(),
+  'kitchen_supervision': () => KitchenSupervisionPlugin(),
+};
+
+/// Top-level entry point for Plugin Isolates.
 void pluginWorkerEntry(Map<String, dynamic> args) {
   final sendPort = args['sendPort'] as SendPort;
   final pluginType = args['pluginType'] as String?;
 
-  SmartStorePlugin plugin;
-  if (pluginType == 'kitchen_supervision') {
-    plugin = KitchenSupervisionPlugin();
-  } else {
-    // Default
-    plugin = PeopleCountingPlugin();
-  }
+  final factory =
+      _pluginFactories[pluginType] ?? _pluginFactories['people_counting']!;
+  final plugin = factory();
 
   final receivePort = ReceivePort();
   sendPort.send(receivePort.sendPort);

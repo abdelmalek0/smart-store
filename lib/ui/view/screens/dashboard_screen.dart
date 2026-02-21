@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import 'package:smart_store_linux/core/services/app/app_service.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:smart_store_linux/core/di/injection_container.dart';
+import 'package:smart_store_linux/presentation/blocs/dashboard/dashboard_bloc.dart';
+import 'package:smart_store_linux/presentation/blocs/dashboard/dashboard_event.dart';
+import 'package:smart_store_linux/presentation/blocs/dashboard/dashboard_state.dart';
 import 'package:smart_store_linux/ui/view/widgets/modern/modern_widgets.dart';
 import 'package:smart_store_linux/ui/view/widgets/cards/stat_card.dart';
-import 'package:smart_store_linux/ui/viewModels/dashboard_viewmodel.dart';
 import 'package:smart_store_linux/ui/view/widgets/cards/resource_bar.dart';
 
 class DashboardScreen extends StatelessWidget {
@@ -11,8 +13,8 @@ class DashboardScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider(
-      create: (_) => DashboardViewModel(AppService.instance),
+    return BlocProvider<DashboardBloc>(
+      create: (_) => sl<DashboardBloc>()..add(const DashboardStarted()),
       child: const _DashboardContent(),
     );
   }
@@ -23,8 +25,8 @@ class _DashboardContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Consumer<DashboardViewModel>(
-      builder: (context, vm, _) {
+    return BlocBuilder<DashboardBloc, DashboardState>(
+      builder: (context, state) {
         return SingleChildScrollView(
           child: Column(
             children: [
@@ -37,25 +39,25 @@ class _DashboardContent extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // 2. Main Content Grid
                     LayoutBuilder(
                       builder: (context, constraints) {
-                        // Responsive layout: Row on wide screens, Column on narrow
                         if (constraints.maxWidth > 900) {
                           return Row(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Expanded(flex: 2, child: const _HealthCard()),
+                              Expanded(
+                                flex: 2,
+                                child: _HealthCard(state: state),
+                              ),
                             ],
                           );
                         } else {
-                          return const Column(children: [_HealthCard()]);
+                          return Column(children: [_HealthCard(state: state)]);
                         }
                       },
                     ),
                     const SizedBox(height: 10),
-                    // 1. Top Stats Row
-                    _buildStatsRow(context, vm),
+                    _buildStatsRow(context, state),
                   ],
                 ),
               ),
@@ -66,38 +68,36 @@ class _DashboardContent extends StatelessWidget {
     );
   }
 
-  Widget _buildStatsRow(BuildContext context, DashboardViewModel vm) {
+  Widget _buildStatsRow(BuildContext context, DashboardState state) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        // 3 items per row on wide, spacing 16. Total spacing = 16 * 2 = 32.
         final cardWidth = (constraints.maxWidth - 32) / 3;
-
         return Wrap(
           spacing: 16,
           runSpacing: 16,
           children: [
             StatCard(
               title: "Cameras",
-              value: "${vm.cameraCount}",
+              value: "${state.cameraCount}",
               icon: Icons.videocam,
               color: Colors.blueAccent,
               width: cardWidth,
             ),
             StatCard(
               title: "AI Models",
-              value: "${vm.modelCount}",
+              value: "${state.modelCount}",
               icon: Icons.extension,
               color: Colors.purpleAccent,
               width: cardWidth,
             ),
             StatCard(
               title: "Plugins",
-              value: "${vm.pluginCount}",
+              value: "${state.pluginCount}",
               icon: Icons.layers,
               color: Colors.orangeAccent,
               width: cardWidth,
             ),
-            _ControlCard(vm: vm, width: cardWidth),
+            _ControlCard(state: state, width: cardWidth),
           ],
         );
       },
@@ -106,130 +106,106 @@ class _DashboardContent extends StatelessWidget {
 }
 
 class _HealthCard extends StatelessWidget {
-  const _HealthCard();
+  final DashboardState state;
+
+  const _HealthCard({required this.state});
 
   @override
   Widget build(BuildContext context) {
-    // Listen to AppService for updates
-    // Note: We access AppService global instance here for simplicity in this pure view widget,
-    // or we could pass data via ViewModel if we want strict purity.
-    // Given the pattern, using AppService.instance here for *data binding* in a dumb widget is okay,
-    // OR we should be getting these stats from the ViewModel.
-    // The previous implementation used AppService.instance directly.
-    // To be strictly MVVM/DI specific, we should probably access these via the ViewModel or pass them in.
-    // However, the ViewModel "stats" getter delegates to AppService anyway.
-    // Let's stick to using ViewModel data if possible, or Consumer.
-
-    // Better: Consumer<DashboardViewModel> is already above.
-    // But _HealthCard is static content structure, data comes from... AppService.instance directly in original code.
-    // Let's keep it as is for now to minimize risk, but access via AppService.instance is still a direct dependency.
-    // Ideally ViewModel should expose a 'systemStats' object we can listen to.
-    // But ViewModel notifies listeners when AppService updates.
-
-    return Consumer<DashboardViewModel>(
-      builder: (context, vm, _) {
-        // We can access properties through VM since it wraps AppService properties
-        return Container(
-          padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(
-            color: const Color(0xFF111827),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: const Color(0xFF1F2937)),
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: const Color(0xFF111827),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFF1F2937)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            "System Health",
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                "System Health",
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 20),
-
-              // CPU
-              Text(
-                vm.cpuName,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w600,
-                  fontSize: 13,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-              const SizedBox(height: 4),
-              ResourceBar(
-                label: "CPU Usage",
-                detail: "${vm.stats['cpu']?.toStringAsFixed(1)}%",
-                percentage: vm.stats['cpu'] ?? 0,
-                color: Colors.blueAccent,
-              ),
-              const SizedBox(height: 15),
-
-              // RAM
-              ResourceBar(
-                label: "RAM Usage",
-                detail:
-                    "${vm.stats['ram']?.toStringAsFixed(1)} / ${vm.ramTotal.toStringAsFixed(1)} GB",
-                percentage: vm.ramTotal > 0
-                    ? ((vm.stats['ram'] ?? 0) / vm.ramTotal) * 100
-                    : 0,
-                color: Colors.orangeAccent,
-              ),
-              const SizedBox(height: 15),
-
-              // GPU
-              Text(
-                vm.gpuName,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w600,
-                  fontSize: 13,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-              const SizedBox(height: 4),
-              ResourceBar(
-                label: vm.supportsVRAM ? "GPU Usage" : "NPU Usage",
-                detail: "${vm.stats['gpu']?.toStringAsFixed(1)}%",
-                percentage: vm.stats['gpu'] ?? 0,
-                color: Colors.greenAccent,
-              ),
-              if (vm.supportsVRAM) ...[
-                const SizedBox(height: 15),
-
-                // VRAM
-                ResourceBar(
-                  label: "VRAM",
-                  detail:
-                      "${vm.vramUsage.toStringAsFixed(1)} / ${vm.vramTotal.toStringAsFixed(1)} GB",
-                  percentage: vm.vramTotal > 0
-                      ? (vm.vramUsage / vm.vramTotal) * 100
-                      : 0,
-                  color: Colors.purpleAccent,
-                ),
-              ],
-            ],
+          const SizedBox(height: 20),
+          // CPU
+          Text(
+            state.cpuName,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w600,
+              fontSize: 13,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
           ),
-        );
-      },
+          const SizedBox(height: 4),
+          ResourceBar(
+            label: "CPU Usage",
+            detail: "${state.stats['cpu']?.toStringAsFixed(1)}%",
+            percentage: state.stats['cpu'] ?? 0,
+            color: Colors.blueAccent,
+          ),
+          const SizedBox(height: 15),
+          // RAM
+          ResourceBar(
+            label: "RAM Usage",
+            detail:
+                "${state.stats['ram']?.toStringAsFixed(1)} / ${state.ramTotal.toStringAsFixed(1)} GB",
+            percentage: state.ramTotal > 0
+                ? ((state.stats['ram'] ?? 0) / state.ramTotal) * 100
+                : 0,
+            color: Colors.orangeAccent,
+          ),
+          const SizedBox(height: 15),
+          // GPU
+          Text(
+            state.gpuName,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w600,
+              fontSize: 13,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 4),
+          ResourceBar(
+            label: state.supportsVRAM ? "GPU Usage" : "NPU Usage",
+            detail: "${state.stats['gpu']?.toStringAsFixed(1)}%",
+            percentage: state.stats['gpu'] ?? 0,
+            color: Colors.greenAccent,
+          ),
+          if (state.supportsVRAM) ...[
+            const SizedBox(height: 15),
+            ResourceBar(
+              label: "VRAM",
+              detail:
+                  "${state.vramUsage.toStringAsFixed(1)} / ${state.vramTotal.toStringAsFixed(1)} GB",
+              percentage: state.vramTotal > 0
+                  ? (state.vramUsage / state.vramTotal) * 100
+                  : 0,
+              color: Colors.purpleAccent,
+            ),
+          ],
+        ],
+      ),
     );
   }
 }
 
 class _ControlCard extends StatelessWidget {
-  final DashboardViewModel vm;
+  final DashboardState state;
   final double width;
 
-  const _ControlCard({required this.vm, required this.width});
+  const _ControlCard({required this.state, required this.width});
 
   @override
   Widget build(BuildContext context) {
-    final isRunning = vm.isEngineRunning;
+    final isRunning = state.isEngineRunning;
     return Container(
       width: width,
       padding: const EdgeInsets.all(16),
@@ -280,7 +256,9 @@ class _ControlCard extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           InkWell(
-            onTap: () => vm.toggleEngine(),
+            onTap: () => context.read<DashboardBloc>().add(
+              const DashboardEngineToggleRequested(),
+            ),
             child: Row(
               children: [
                 Text(

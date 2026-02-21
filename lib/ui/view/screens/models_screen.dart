@@ -1,58 +1,58 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import 'package:smart_store_linux/ui/utils/theme/app_theme.dart';
-
-import 'package:smart_store_linux/ui/view/widgets/modern/modern_widgets.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:smart_store_linux/core/config/models/model_config.dart';
+import 'package:smart_store_linux/core/di/injection_container.dart';
+import 'package:smart_store_linux/presentation/blocs/models/models_bloc.dart';
+import 'package:smart_store_linux/presentation/blocs/models/models_event.dart';
+import 'package:smart_store_linux/presentation/blocs/models/models_state.dart';
+import 'package:smart_store_linux/ui/utils/theme/app_theme.dart';
+import 'package:smart_store_linux/ui/view/widgets/modern/modern_widgets.dart';
 import 'package:smart_store_linux/ui/view/widgets/dialogs/models_dialogs.dart';
-import 'package:smart_store_linux/ui/viewModels/models_viewmodel.dart';
 
 class ModelsScreen extends StatelessWidget {
   const ModelsScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider(
-      create: (_) => ModelsViewModel(),
-      child: Consumer<ModelsViewModel>(
-        builder: (context, vm, _) {
-          return Column(
-            children: [
-              ModernHeader(
-                title: "Models",
-                subtitle: "Manage ONNX models",
-                actions: [
-                  ModernButton(
-                    label: "Add Model",
-                    icon: Icons.add,
-                    onPressed: () => showAddModelDialog(context, vm),
-                  ),
-                ],
+    return BlocProvider<ModelsBloc>(
+      create: (_) => sl<ModelsBloc>()..add(const ModelsLoaded()),
+      child: Builder(
+        builder: (context) => Column(
+          children: [
+            ModernHeader(
+              title: "Models",
+              subtitle: "Manage ONNX models",
+              actions: [
+                ModernButton(
+                  label: "Add Model",
+                  icon: Icons.add,
+                  onPressed: () => showAddModelDialog(context),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            Expanded(
+              child: BlocBuilder<ModelsBloc, ModelsState>(
+                builder: (context, state) {
+                  if (state.models.isEmpty) {
+                    return _buildEmptyState(context);
+                  }
+                  return ListView.builder(
+                    itemCount: state.models.length,
+                    itemBuilder: (context, index) {
+                      return _buildModelCard(context, state.models[index]);
+                    },
+                  );
+                },
               ),
-              const SizedBox(height: 20),
-              Expanded(
-                child: vm.models.isEmpty
-                    ? _buildEmptyState(context, vm)
-                    : ListView.builder(
-                        itemCount: vm.models.length,
-                        itemBuilder: (context, index) {
-                          final model = vm.models[index];
-                          return _buildModelCard(context, model, vm);
-                        },
-                      ),
-              ),
-            ],
-          );
-        },
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _buildModelCard(
-    BuildContext context,
-    ModelConfig model,
-    ModelsViewModel vm,
-  ) {
+  Widget _buildModelCard(BuildContext context, ModelConfig model) {
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(16),
@@ -64,7 +64,6 @@ class ModelsScreen extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Main row: icon, name/path, actions
           Row(
             children: [
               Container(
@@ -93,7 +92,6 @@ class ModelsScreen extends StatelessWidget {
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
-                        // Custom Labels Badge
                         if (model.labels.isNotEmpty) ...[
                           const SizedBox(width: 8),
                           _buildLabelsBadge(model.labels.length),
@@ -114,15 +112,14 @@ class ModelsScreen extends StatelessWidget {
                   ],
                 ),
               ),
-              // Upload Labels Button
               IconButton(
                 icon: Icon(
                   model.labels.isNotEmpty ? Icons.label : Icons.label_outline,
                   color: model.labels.isNotEmpty
-                      ? const Color(0xFF10B981) // Green when active
+                      ? const Color(0xFF10B981)
                       : const Color(0xFF6B7280),
                 ),
-                onPressed: () => showUploadLabelsDialog(context, model, vm),
+                onPressed: () => showUploadLabelsDialog(context, model),
                 tooltip: model.labels.isNotEmpty
                     ? "Custom Labels (${model.labels.length} classes)"
                     : "Upload Labels",
@@ -132,7 +129,8 @@ class ModelsScreen extends StatelessWidget {
                   Icons.delete_outline,
                   color: Color(0xFFEF4444),
                 ),
-                onPressed: () => vm.removeModel(model.id),
+                onPressed: () =>
+                    context.read<ModelsBloc>().add(ModelRemoved(model.id)),
                 tooltip: "Remove Model",
               ),
             ],
@@ -142,7 +140,6 @@ class ModelsScreen extends StatelessWidget {
     );
   }
 
-  /// Badge showing custom labels are active
   Widget _buildLabelsBadge(int count) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
@@ -171,7 +168,7 @@ class ModelsScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildEmptyState(BuildContext context, ModelsViewModel vm) {
+  Widget _buildEmptyState(BuildContext context) {
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -191,7 +188,7 @@ class ModelsScreen extends StatelessWidget {
           ModernButton(
             label: "Add your first model",
             icon: Icons.add,
-            onPressed: () => showAddModelDialog(context, vm),
+            onPressed: () => showAddModelDialog(context),
           ),
         ],
       ),

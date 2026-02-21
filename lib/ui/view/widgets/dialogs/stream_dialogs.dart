@@ -1,14 +1,18 @@
 import 'package:flutter/material.dart';
-import 'package:smart_store_linux/ui/viewModels/streams_viewmodel.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:smart_store_linux/presentation/blocs/streams/streams_bloc.dart';
+import 'package:smart_store_linux/presentation/blocs/streams/streams_event.dart';
 
-void showAddStreamDialog(BuildContext context, StreamsViewModel vm) {
+/// Shows the "Add Stream" dialog. Dispatches [StreamAdded] to the [StreamsBloc].
+void showAddStreamDialog(BuildContext context) {
   final urlController = TextEditingController();
   final nameController = TextEditingController();
+  final bloc = context.read<StreamsBloc>();
 
   showDialog(
     context: context,
     builder: (context) => AlertDialog(
-      backgroundColor: const Color(0xFF1E293B), // Slate-800
+      backgroundColor: const Color(0xFF1E293B),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       title: const Text(
         "Add New Camera",
@@ -38,11 +42,13 @@ void showAddStreamDialog(BuildContext context, StreamsViewModel vm) {
           child: const Text("Connect"),
           onPressed: () {
             if (urlController.text.isNotEmpty) {
-              vm.addStream(
-                nameController.text.isNotEmpty
-                    ? nameController.text
-                    : urlController.text,
-                urlController.text,
+              bloc.add(
+                StreamAdded(
+                  name: nameController.text.isNotEmpty
+                      ? nameController.text
+                      : urlController.text,
+                  url: urlController.text,
+                ),
               );
               Navigator.pop(context);
             }
@@ -61,7 +67,7 @@ Widget _buildDialogInput(TextEditingController controller, String hint) {
       hintText: hint,
       hintStyle: const TextStyle(color: Color(0xFF64748B)),
       filled: true,
-      fillColor: const Color(0xFF0F172A), // Slate-900
+      fillColor: const Color(0xFF0F172A),
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(8),
         borderSide: BorderSide.none,

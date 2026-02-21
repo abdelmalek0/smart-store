@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'package:flutter/foundation.dart';
+import 'dart:developer';
 import 'package:smart_store_linux/core/models/frames.dart';
 import 'package:smart_store_linux/core/streaming/capture_runtime.dart';
 import 'package:smart_store_linux/core/streaming/stream_registry.dart';
@@ -39,11 +39,11 @@ class StreamManager {
   /// Initialize and start a single stream
   Future<void> initializeStream(StreamConfig config) async {
     if (StreamRegistry.instance.isRegistered(config.id)) {
-      debugPrint("StreamManager: Stream ${config.id} already initialized.");
+      log('StreamManager: Stream ${config.id} already initialized.');
       return;
     }
 
-    debugPrint("StreamManager: Initializing stream ${config.id}...");
+    log('StreamManager: Initializing stream ${config.id}...');
 
     final frameController = StreamController<RawFrame>.broadcast();
     _frameControllers[config.id] = frameController;
@@ -74,14 +74,10 @@ class StreamManager {
         // Store labels for this stream so Pipeline can access them
         _streamLabels[config.id] = labels;
         _labelControllers[config.id]?.add(labels);
-        debugPrint(
-          "StreamManager: Received ${labels.length} labels for ${config.id}",
-        );
+        log('StreamManager: Received ${labels.length} labels for ${config.id}');
       },
       onInitComplete: (vid, tex) {
-        debugPrint(
-          "StreamManager: Stream ${config.id} initialized (VideoID: $vid)",
-        );
+        log('StreamManager: Stream ${config.id} initialized (VideoID: $vid)');
       },
     );
 
@@ -92,8 +88,8 @@ class StreamManager {
     final modelPath = ConfigService.instance.getEffectiveModelPathForStream(
       config.id,
     );
-    debugPrint(
-      "StreamManager: Starting capture for ${config.id} with model: $modelPath",
+    log(
+      'StreamManager: Starting capture for ${config.id} with model: $modelPath',
     );
 
     await runtime.start(modelPath);

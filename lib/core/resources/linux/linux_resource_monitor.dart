@@ -1,32 +1,49 @@
 import 'dart:async';
 import 'dart:io';
-import 'package:flutter/foundation.dart';
-import 'package:smart_store_linux/core/services/app/app_service.dart';
+import 'dart:developer';
 
-class LinuxResourceMonitor {
+import 'package:smart_store_linux/core/resources/resource_monitor.dart';
+
+/// Linux implementation of [ResourceMonitor].
+///
+/// Reads CPU usage from /proc/stat, RAM via `free -m`,
+/// and GPU via `nvidia-smi`. Pushes data via injected callbacks —
+/// never reaches into AppService or any outer layer.
+class LinuxResourceMonitor implements ResourceMonitor {
   Timer? _timer;
+  StatsCallback? _onStats;
+  HardwareCallback? _onHardware;
 
-  // Cache for CPU calculation
+  // CPU delta state
   int _prevTotal = 0;
   int _prevIdle = 0;
 
   LinuxResourceMonitor();
 
-  void start() {
+  @override
+  void start({
+    required StatsCallback onStats,
+    required HardwareCallback onHardware,
+  }) {
+    _onStats = onStats;
+    _onHardware = onHardware;
+
     _fetchHardwareNames();
     _fetchStats(); // Initial fetch
     _timer = Timer.periodic(const Duration(seconds: 2), (_) => _fetchStats());
   }
 
+  @override
   void stop() {
     _timer?.cancel();
+    _timer = null;
   }
 
   Future<void> _fetchHardwareNames() async {
-    String cpu = "Unknown CPU";
-    String gpu = "Unknown GPU";
+    String cpu = 'Unknown CPU';
+    String gpu = 'Unknown GPU';
 
-    // Detect CPU
+    // Detect CPU from /proc/cpuinfo
     try {
       final result = await Process.run('grep', [
         '-m',
@@ -35,19 +52,15 @@ class LinuxResourceMonitor {
         '/proc/cpuinfo',
       ]);
       if (result.exitCode == 0) {
-        // Output: model name : Intel(R) Core(TM) ...
         final parts = result.stdout.toString().split(':');
-        if (parts.length > 1) {
-          cpu = parts[1].trim();
-        }
+        if (parts.length > 1) cpu = parts[1].trim();
       }
     } catch (e) {
-      debugPrint("Error detecting CPU: $e");
+      log('LinuxResourceMonitor: Error detecting CPU: $e');
     }
 
-    // Detect GPU (Nvidia)
+    // Detect GPU — try nvidia-smi, fall back to lspci
     try {
-      // Try nvidia-smi first
       final result = await Process.run('nvidia-smi', [
         '--query-gpu=name',
         '--format=csv,noheader',
@@ -55,28 +68,23 @@ class LinuxResourceMonitor {
       if (result.exitCode == 0) {
         gpu = result.stdout.toString().trim();
       } else {
-        // Fallback to lspci
         final lspci = await Process.run('lspci', []);
         if (lspci.exitCode == 0) {
-          final lines = lspci.stdout.toString().split('\n');
-          final vga = lines.firstWhere(
-            (l) => l.contains('VGA'),
-            orElse: () => "",
-          );
+          final vga = lspci.stdout
+              .toString()
+              .split('\n')
+              .firstWhere((l) => l.contains('VGA'), orElse: () => '');
           if (vga.isNotEmpty) {
-            // 01:00.0 VGA compatible controller: NVIDIA Corporation ...
-            final index = vga.indexOf(': ');
-            if (index != -1) {
-              gpu = vga.substring(index + 2).trim();
-            }
+            final idx = vga.indexOf(': ');
+            if (idx != -1) gpu = vga.substring(idx + 2).trim();
           }
         }
       }
     } catch (e) {
-      debugPrint("Error detecting GPU: $e");
+      log('LinuxResourceMonitor: Error detecting GPU: $e');
     }
 
-    AppService.instance.system.updateHardwareInfo(cpu, gpu);
+    _onHardware?.call(cpu, gpu);
   }
 
   Future<void> _fetchStats() async {
@@ -87,20 +95,18 @@ class LinuxResourceMonitor {
     double vramUsage = 0.0;
     double vramTotal = 0.0;
 
-    // CPU Usage via /proc/stat
+    // CPU via /proc/stat
     try {
       final file = File('/proc/stat');
       if (await file.exists()) {
         final lines = await file.readAsLines();
         if (lines.isNotEmpty) {
-          // cpu  2255 34 2290 22625563 ...
           final parts = lines[0].trim().split(RegExp(r'\s+'));
           if (parts.length >= 5) {
             final user = int.tryParse(parts[1]) ?? 0;
             final nice = int.tryParse(parts[2]) ?? 0;
             final system = int.tryParse(parts[3]) ?? 0;
             final idle = int.tryParse(parts[4]) ?? 0;
-
             final total = user + nice + system + idle;
 
             if (_prevTotal != 0) {
@@ -116,58 +122,53 @@ class LinuxResourceMonitor {
         }
       }
     } catch (e) {
-      debugPrint("Error reading CPU stats: $e");
+      log('LinuxResourceMonitor: Error reading CPU: $e');
     }
 
-    // RAM Usage via free -m
+    // RAM via free -m
     try {
       final result = await Process.run('free', ['-m']);
       if (result.exitCode == 0) {
         final lines = result.stdout.toString().split('\n');
-        // Mem: Total Used Free ...
         if (lines.length > 1) {
           final parts = lines[1].trim().split(RegExp(r'\s+'));
-          // parts[0]="Mem:", parts[1]=Total, parts[2]=Used
           if (parts.length >= 3) {
             final total = double.tryParse(parts[1]) ?? 1;
             final used = double.tryParse(parts[2]) ?? 0;
-            ramUsage = used / 1024.0; // Convert MB to GB
+            ramUsage = used / 1024.0;
             ramTotal = total / 1024.0;
           }
         }
       }
     } catch (e) {
-      debugPrint("Error reading RAM stats: $e");
+      log('LinuxResourceMonitor: Error reading RAM: $e');
     }
 
-    // GPU Stats via nvidia-smi
+    // GPU via nvidia-smi
     try {
-      // utilization.gpu, memory.used, memory.total
       final result = await Process.run('nvidia-smi', [
         '--query-gpu=utilization.gpu,memory.used,memory.total',
         '--format=csv,noheader,nounits',
       ]);
-
       if (result.exitCode == 0) {
         final parts = result.stdout.toString().trim().split(',');
         if (parts.length >= 3) {
           gpuUsage = double.tryParse(parts[0].trim()) ?? 0.0;
           final usedMb = double.tryParse(parts[1].trim()) ?? 0.0;
           final totalMb = double.tryParse(parts[2].trim()) ?? 0.0;
-
           vramUsage = usedMb / 1024.0;
           vramTotal = totalMb / 1024.0;
         }
       }
-    } catch (e) {
-      // GPU monitor might fail if nvidia-smi not present
+    } catch (_) {
+      // nvidia-smi may not be present — silently skip
     }
 
-    AppService.instance.system.updateStats(
+    _onStats?.call(
       cpu: cpuUsage,
+      gpu: gpuUsage,
       ram: ramUsage,
       ramTotal: ramTotal,
-      gpu: gpuUsage,
       vram: vramUsage,
       vramTotal: vramTotal,
     );

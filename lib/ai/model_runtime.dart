@@ -1,9 +1,9 @@
 import 'dart:async';
 import 'dart:isolate';
 import 'package:flutter/foundation.dart';
-import 'package:smart_store_linux/ai/models/inference_result.dart';
-import 'package:smart_store_linux/ai/worker/inference_worker.dart';
-import 'package:smart_store_linux/ai/worker/messages.dart';
+import 'package:smart_store_linux/features/inference/models/inference_result.dart';
+import 'package:smart_store_linux/features/inference/worker/inference_worker.dart';
+import 'package:smart_store_linux/features/inference/worker/messages.dart';
 
 /// Single Runtime Instance for a specific Model
 ///

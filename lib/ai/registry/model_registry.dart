@@ -1,4 +1,4 @@
-import 'package:smart_store_linux/ai/models/model_info.dart';
+import 'package:smart_store_linux/features/inference/models/model_info.dart';
 
 /// Central registry for AI Models.
 ///

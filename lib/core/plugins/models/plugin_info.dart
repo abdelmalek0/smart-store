@@ -1,11 +1,13 @@
-import 'package:flutter/material.dart';
-
-/// Metadata for an available plugin
+/// Metadata for an available plugin.
+///
+/// Pure Dart — no Flutter dependencies.
 class PluginInfo {
   final String id;
   final String name;
   final String description;
-  final IconData icon;
+
+  /// Icon name key for UI icon lookup (see `PluginCatalog.iconFor`).
+  final String iconName;
   final bool isActive;
 
   /// Default config values for this plugin type (e.g. classId thresholds)
@@ -15,7 +17,7 @@ class PluginInfo {
     required this.id,
     required this.name,
     required this.description,
-    required this.icon,
+    required this.iconName,
     this.isActive = true,
     this.defaultConfig = const {},
   });

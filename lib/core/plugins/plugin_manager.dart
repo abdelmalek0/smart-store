@@ -1,6 +1,6 @@
 import 'dart:async';
+import 'dart:developer';
 import 'package:smart_store_linux/core/models/frames.dart';
-import 'package:flutter/foundation.dart';
 import 'package:smart_store_linux/core/config/config_service.dart';
 import 'package:smart_store_linux/core/plugins/plugin_runtime.dart';
 import 'package:smart_store_linux/core/plugins/plugin_registry.dart';
@@ -54,7 +54,7 @@ class PluginManager {
     // 1. Get Config from ConfigService
     final pluginConfig = ConfigService.instance.getPlugin(pluginId);
     if (pluginConfig == null || !pluginConfig.enabled) {
-      debugPrint("PluginManager: Plugin $pluginId not found or disabled");
+      log('PluginManager: Plugin $pluginId not found or disabled');
       return;
     }
 

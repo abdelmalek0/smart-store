@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:smart_store_linux/core/services/app/app_service.dart';
-import 'package:smart_store_linux/core/controllers/stream_playback_controller.dart';
-import 'package:smart_store_linux/core/engine/pipeline_manager.dart';
-import 'package:smart_store_linux/core/models/frames.dart';
+import 'package:smart_store_linux/ui/controllers/stream_playback_controller.dart';
+import 'package:smart_store_linux/features/engine/engine_orchestrator.dart';
+import 'package:smart_store_linux/domain/entities/processed_frame.dart';
 import 'package:smart_store_linux/ui/view/widgets/media/detection_overlay_painter.dart';
 
 class DetachedStreamPlayer extends StatefulWidget {
@@ -35,9 +34,7 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
   @override
   void initState() {
     super.initState();
-    _controller = AppService.instance.streams.createPlaybackController(
-      widget.streamId,
-    );
+    _controller = StreamPlaybackController(widget.streamId);
     _controller.addListener(_onControllerStateChanged);
     // DON'T initialize here - wait until widget is actually visible
   }
@@ -94,9 +91,9 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
 
     // Subscribe to the detection stream (ProcessedFrame) which drives the loop
     return AnimatedBuilder(
-      animation: PipelineManager.instance,
+      animation: EngineOrchestrator.instance,
       builder: (context, child) {
-        final pipeline = PipelineManager.instance.getPipeline(widget.streamId);
+        final pipeline = EngineOrchestrator.instance.getPipeline(widget.streamId);
 
         if (pipeline == null) {
           return const Center(

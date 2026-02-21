@@ -10,6 +10,10 @@ dependencies:
     sdk: flutter
   # State Management
   provider: ^6.1.1
+  flutter_bloc: ^9.1.0
+  bloc: ^9.0.0
+  equatable: ^2.0.5
+  get_it: ^8.0.2
   # File system
   path_provider: ^2.1.1
   # (Optional) For decoding images to show on screen

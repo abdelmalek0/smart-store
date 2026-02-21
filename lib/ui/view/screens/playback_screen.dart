@@ -1,107 +1,99 @@
 import 'package:flutter/material.dart';
-import 'package:smart_store_linux/core/config/config_service.dart';
-
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:smart_store_linux/services/config_service.dart';
+import 'package:smart_store_linux/core/di/injection_container.dart';
+import 'package:smart_store_linux/features/engine/engine_orchestrator.dart';
+import 'package:smart_store_linux/presentation/blocs/playback/playback_bloc.dart';
+import 'package:smart_store_linux/presentation/blocs/playback/playback_event.dart';
+import 'package:smart_store_linux/presentation/blocs/playback/playback_state.dart';
 import 'package:smart_store_linux/ui/utils/theme/app_theme.dart';
 import 'package:smart_store_linux/ui/view/widgets/modern/modern_widgets.dart';
 import 'package:smart_store_linux/ui/view/widgets/media/detached_stream_player.dart';
-import 'package:smart_store_linux/core/engine/pipeline_manager.dart';
 import 'package:smart_store_linux/ui/view/widgets/navigation/camera_sidebar.dart';
-import 'package:smart_store_linux/ui/viewModels/playback_viewmodel.dart';
 
-class PlaybackScreen extends StatefulWidget {
+class PlaybackScreen extends StatelessWidget {
   const PlaybackScreen({super.key});
 
   @override
-  State<PlaybackScreen> createState() => _PlaybackScreenState();
+  Widget build(BuildContext context) {
+    return BlocProvider<PlaybackBloc>(
+      create: (_) => sl<PlaybackBloc>(),
+      child: const _PlaybackContent(),
+    );
+  }
 }
 
-class _PlaybackScreenState extends State<PlaybackScreen> {
-  late final PlaybackViewModel _vm;
-
-  @override
-  void initState() {
-    super.initState();
-    _vm = PlaybackViewModel();
-  }
-
-  @override
-  void dispose() {
-    _vm.dispose();
-    super.dispose();
-  }
+class _PlaybackContent extends StatelessWidget {
+  const _PlaybackContent();
 
   @override
   Widget build(BuildContext context) {
-    return ListenableBuilder(
-      listenable: ConfigService.instance,
-      builder: (context, child) {
-        final streams = ConfigService.instance.streams;
+    final streams = ConfigService.instance.streams;
 
-        if (streams.isEmpty) {
-          return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(Icons.videocam_off, size: 60, color: AppTheme.text),
-                const SizedBox(height: 16),
-                ModernLabel(
-                  "No streams available.",
-                  color: AppTheme.text.withValues(alpha: 0.5),
-                  fontSize: 18,
-                ),
-              ],
+    if (streams.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.videocam_off, size: 60, color: AppTheme.text),
+            const SizedBox(height: 16),
+            ModernLabel(
+              "No streams available.",
+              color: AppTheme.text.withValues(alpha: 0.5),
+              fontSize: 18,
             ),
-          );
-        }
+          ],
+        ),
+      );
+    }
 
-        // Auto-select first stream if none selected
-        _vm.autoSelectFirst(streams);
+    // Auto-select first stream if none selected
+    if (streams.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        context.read<PlaybackBloc>().add(
+          PlaybackFirstAutoSelected(streams.first.id),
+        );
+      });
+    }
 
+    return BlocBuilder<PlaybackBloc, PlaybackState>(
+      builder: (context, state) {
+        final selectedId = state.selectedStreamId ?? streams.first.id;
         final selectedStream = streams.firstWhere(
-          (s) => s.id == _vm.selectedStreamId,
+          (s) => s.id == selectedId,
           orElse: () => streams.first,
         );
 
         return Row(
           children: [
-            // Collapsible Sidebar
             CameraSidebar(
               streams: streams,
-              selectedStreamId: _vm.selectedStreamId,
-              onStreamSelected: (id) {
-                setState(() => _vm.selectStream(id));
-              },
-              isOpen: _vm.isSidebarOpen,
-              processManager: PipelineManager.instance,
+              selectedStreamId: selectedId,
+              onStreamSelected: (id) =>
+                  context.read<PlaybackBloc>().add(PlaybackStreamSelected(id)),
+              isOpen: state.isSidebarOpen,
+              processManager: EngineOrchestrator.instance,
             ),
-
-            // Main Content Area
             Expanded(
               child: Container(
-                color: const Color(
-                  0xFF0F1218,
-                ), // Main background (Darker than sidebar)
+                color: const Color(0xFF0F1218),
                 child: Column(
                   children: [
-                    // Top Header Bar
                     Container(
                       height: 60,
                       padding: const EdgeInsets.symmetric(horizontal: 24),
                       decoration: const BoxDecoration(
                         border: Border(
-                          bottom: BorderSide(
-                            color: Color(0xFF1E293B),
-                          ), // Slate-800
+                          bottom: BorderSide(color: Color(0xFF1E293B)),
                         ),
                       ),
                       child: Row(
                         children: [
-                          // Live Status Indicator
                           Container(
                             width: 8,
                             height: 8,
                             decoration: BoxDecoration(
-                              color: const Color(0xFFEF4444), // Red-500
+                              color: const Color(0xFFEF4444),
                               shape: BoxShape.circle,
                               boxShadow: [
                                 BoxShadow(
@@ -123,65 +115,43 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
                               fontSize: 14,
                             ),
                           ),
-
                           const Spacer(),
-
-                          // Expand Button (Toggle Sidebar)
                           _buildHeaderButton(
-                            _vm.isSidebarOpen
+                            context,
+                            state.isSidebarOpen
                                 ? Icons.fullscreen
                                 : Icons.fullscreen_exit,
-                            _vm.isSidebarOpen ? "Expand" : "Collapse",
-                            () {
-                              setState(() {
-                                _vm.toggleSidebar();
-                              });
-                            },
+                            state.isSidebarOpen ? "Expand" : "Collapse",
                             highlight: true,
                           ),
                         ],
                       ),
                     ),
-
-                    // Video Player Area
                     Expanded(
                       child: Padding(
                         padding: const EdgeInsets.all(24.0),
-                        child: LayoutBuilder(
-                          builder: (context, constraints) {
-                            // Resolve Model Path
-                            // final modelPath = ConfigService.instance
-                            //     .getEffectiveModelPathForStream(
-                            //       selectedStream.id,
-                            //     );
-
-                            return Center(
-                              child: AspectRatio(
-                                aspectRatio:
-                                    16 / 9, // Enforce 16:9 for cinematic look
-                                child: Container(
-                                  decoration: BoxDecoration(
-                                    color: Colors.black,
-                                    borderRadius: BorderRadius.circular(8),
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: Colors.black.withValues(
-                                          alpha: 0.5,
-                                        ),
-                                        blurRadius: 20,
-                                        offset: const Offset(0, 10),
-                                      ),
-                                    ],
+                        child: Center(
+                          child: AspectRatio(
+                            aspectRatio: 16 / 9,
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: Colors.black,
+                                borderRadius: BorderRadius.circular(8),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withValues(alpha: 0.5),
+                                    blurRadius: 20,
+                                    offset: const Offset(0, 10),
                                   ),
-                                  clipBehavior: Clip.antiAlias,
-                                  child: DetachedStreamPlayer(
-                                    key: ValueKey(selectedStream.id),
-                                    streamId: selectedStream.id,
-                                  ),
-                                ),
+                                ],
                               ),
-                            );
-                          },
+                              clipBehavior: Clip.antiAlias,
+                              child: DetachedStreamPlayer(
+                                key: ValueKey(selectedStream.id),
+                                streamId: selectedStream.id,
+                              ),
+                            ),
+                          ),
                         ),
                       ),
                     ),
@@ -196,23 +166,20 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
   }
 
   Widget _buildHeaderButton(
+    BuildContext context,
     IconData icon,
-    String label,
-    VoidCallback onTap, {
+    String label, {
     bool highlight = false,
   }) {
     return InkWell(
-      onTap: onTap,
+      onTap: () =>
+          context.read<PlaybackBloc>().add(const PlaybackSidebarToggled()),
       borderRadius: BorderRadius.circular(6),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         decoration: BoxDecoration(
-          color: highlight
-              ? const Color(0xFF3B82F6)
-              : Colors.transparent, // Blue or Transparent
-          border: highlight
-              ? null
-              : Border.all(color: const Color(0xFF334155)), // Slate-700
+          color: highlight ? const Color(0xFF3B82F6) : Colors.transparent,
+          border: highlight ? null : Border.all(color: const Color(0xFF334155)),
           borderRadius: BorderRadius.circular(6),
         ),
         child: Row(
@@ -226,9 +193,7 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
             Text(
               label,
               style: TextStyle(
-                color: highlight
-                    ? Colors.white
-                    : const Color(0xFF94A3B8), // Slate-400
+                color: highlight ? Colors.white : const Color(0xFF94A3B8),
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
               ),

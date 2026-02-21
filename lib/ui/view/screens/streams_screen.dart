@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import 'package:smart_store_linux/core/services/app/app_service.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:smart_store_linux/core/config/models/stream_config.dart';
+import 'package:smart_store_linux/core/di/injection_container.dart';
+import 'package:smart_store_linux/presentation/blocs/streams/streams_bloc.dart';
+import 'package:smart_store_linux/presentation/blocs/streams/streams_event.dart';
+import 'package:smart_store_linux/presentation/blocs/streams/streams_state.dart';
 import 'package:smart_store_linux/ui/utils/theme/app_theme.dart';
-
 import 'package:smart_store_linux/ui/view/widgets/modern/modern_widgets.dart';
-import 'package:smart_store_linux/ui/viewModels/streams_viewmodel.dart';
 import 'package:smart_store_linux/ui/view/widgets/dialogs/stream_dialogs.dart';
 
 class StreamsScreen extends StatelessWidget {
@@ -13,21 +14,10 @@ class StreamsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider(
-      create: (_) => StreamsViewModel(AppService.instance),
-      child: const _StreamsContent(),
-    );
-  }
-}
-
-class _StreamsContent extends StatelessWidget {
-  const _StreamsContent();
-
-  @override
-  Widget build(BuildContext context) {
-    return Consumer<StreamsViewModel>(
-      builder: (context, vm, _) {
-        return Column(
+    return BlocProvider<StreamsBloc>(
+      create: (_) => sl<StreamsBloc>()..add(const StreamsLoaded()),
+      child: Builder(
+        builder: (context) => Column(
           children: [
             ModernHeader(
               title: "Streams",
@@ -36,44 +26,43 @@ class _StreamsContent extends StatelessWidget {
                 ModernButton(
                   label: "Add Stream",
                   icon: Icons.add,
-                  onPressed: () => showAddStreamDialog(context, vm),
+                  onPressed: () => showAddStreamDialog(context),
                 ),
               ],
             ),
             const SizedBox(height: 20),
             Expanded(
-              child: vm.streams.isEmpty
-                  ? _buildEmptyState(context, vm)
-                  : ListView.builder(
-                      itemCount: vm.streams.length,
-                      itemBuilder: (context, index) {
-                        final stream = vm.streams[index];
-                        return _buildCameraCard(context, stream, vm);
-                      },
-                    ),
+              child: BlocBuilder<StreamsBloc, StreamsState>(
+                builder: (context, state) {
+                  if (state.streams.isEmpty) {
+                    return _buildEmptyState(context);
+                  }
+                  return ListView.builder(
+                    itemCount: state.streams.length,
+                    itemBuilder: (context, index) {
+                      return _buildCameraCard(context, state.streams[index]);
+                    },
+                  );
+                },
+              ),
             ),
           ],
-        );
-      },
+        ),
+      ),
     );
   }
 
-  Widget _buildCameraCard(
-    BuildContext context,
-    StreamConfig stream,
-    StreamsViewModel vm,
-  ) {
+  Widget _buildCameraCard(BuildContext context, StreamConfig stream) {
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF111827), // Dark slate/black card bg
+        color: const Color(0xFF111827),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: const Color(0xFF1F2937)),
       ),
       child: Row(
         children: [
-          // Thumbnail
           Container(
             width: 80,
             height: 60,
@@ -81,17 +70,13 @@ class _StreamsContent extends StatelessWidget {
               color: Colors.black,
               borderRadius: BorderRadius.circular(8),
               image: const DecorationImage(
-                image: NetworkImage(
-                  "https://placeholder.com/150",
-                ), // Placeholder
+                image: NetworkImage("https://placeholder.com/150"),
                 fit: BoxFit.cover,
                 opacity: 0.6,
               ),
             ),
           ),
           const SizedBox(width: 16),
-
-          // Info
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -132,8 +117,6 @@ class _StreamsContent extends StatelessWidget {
               ],
             ),
           ),
-
-          // Actions
           Row(
             children: [
               IconButton(
@@ -146,7 +129,8 @@ class _StreamsContent extends StatelessWidget {
                   Icons.delete_outline,
                   color: Color(0xFFEF4444),
                 ),
-                onPressed: () => vm.removeStream(stream.id),
+                onPressed: () =>
+                    context.read<StreamsBloc>().add(StreamRemoved(stream.id)),
                 tooltip: "Remove Camera",
               ),
             ],
@@ -156,7 +140,7 @@ class _StreamsContent extends StatelessWidget {
     );
   }
 
-  Widget _buildEmptyState(BuildContext context, StreamsViewModel vm) {
+  Widget _buildEmptyState(BuildContext context) {
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -176,7 +160,7 @@ class _StreamsContent extends StatelessWidget {
           ModernButton(
             label: "Add your first stream",
             icon: Icons.add,
-            onPressed: () => showAddStreamDialog(context, vm),
+            onPressed: () => showAddStreamDialog(context),
           ),
         ],
       ),

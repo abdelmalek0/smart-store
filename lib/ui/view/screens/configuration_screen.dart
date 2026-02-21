@@ -1,26 +1,21 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import 'package:smart_store_linux/core/services/app/app_service.dart';
-
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:smart_store_linux/core/di/injection_container.dart';
+import 'package:smart_store_linux/presentation/blocs/configuration/configuration_bloc.dart';
+import 'package:smart_store_linux/presentation/blocs/configuration/configuration_event.dart';
+import 'package:smart_store_linux/presentation/blocs/configuration/configuration_state.dart';
 import 'package:smart_store_linux/ui/utils/theme/app_theme.dart';
-
 import 'package:smart_store_linux/ui/view/widgets/modern/modern_widgets.dart';
-import 'package:smart_store_linux/ui/viewModels/configuration_viewmodel.dart';
 
-class ConfigurationScreen extends StatefulWidget {
+class ConfigurationScreen extends StatelessWidget {
   const ConfigurationScreen({super.key});
 
   @override
-  State<ConfigurationScreen> createState() => _ConfigurationScreenState();
-}
-
-class _ConfigurationScreenState extends State<ConfigurationScreen> {
-  @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider(
-      create: (_) => ConfigurationViewModel(AppService.instance),
-      child: Consumer<ConfigurationViewModel>(
-        builder: (context, vm, _) {
+    return BlocProvider<ConfigurationBloc>(
+      create: (_) => sl<ConfigurationBloc>()..add(const ConfigurationLoaded()),
+      child: BlocBuilder<ConfigurationBloc, ConfigurationState>(
+        builder: (context, state) {
           return Column(
             children: [
               const ModernHeader(
@@ -29,7 +24,7 @@ class _ConfigurationScreenState extends State<ConfigurationScreen> {
               ),
               const SizedBox(height: 20),
               Expanded(
-                child: vm.streams.isEmpty
+                child: state.streams.isEmpty
                     ? Center(
                         child: ModernLabel(
                           "No streams available. Go to Streams to add one.",
@@ -38,20 +33,16 @@ class _ConfigurationScreenState extends State<ConfigurationScreen> {
                       )
                     : ListView.builder(
                         padding: const EdgeInsets.symmetric(horizontal: 24),
-                        itemCount: vm.streams.length,
+                        itemCount: state.streams.length,
                         itemBuilder: (context, index) {
-                          final stream = vm.streams[index];
-
-                          // Fetch Active Plugin for this stream via ViewModel
-                          final activePluginId = vm.getActivePlugin(stream.id);
+                          final stream = state.streams[index];
+                          final activePluginId = stream.activePluginId;
 
                           return Container(
                             margin: const EdgeInsets.only(bottom: 12),
                             padding: const EdgeInsets.all(20),
                             decoration: BoxDecoration(
-                              color: const Color(
-                                0xFF111827,
-                              ), // Dark slate/black card bg
+                              color: const Color(0xFF111827),
                               borderRadius: BorderRadius.circular(12),
                               border: Border.all(
                                 color: const Color(0xFF1F2937),
@@ -106,7 +97,6 @@ class _ConfigurationScreenState extends State<ConfigurationScreen> {
                                   ],
                                 ),
                                 const SizedBox(height: 20),
-
                                 Row(
                                   children: [
                                     const Text(
@@ -124,9 +114,7 @@ class _ConfigurationScreenState extends State<ConfigurationScreen> {
                                           horizontal: 12,
                                         ),
                                         decoration: BoxDecoration(
-                                          color: const Color(
-                                            0xFF0F172A,
-                                          ), // Darker input bg
+                                          color: const Color(0xFF0F172A),
                                           borderRadius: BorderRadius.circular(
                                             8,
                                           ),
@@ -137,11 +125,11 @@ class _ConfigurationScreenState extends State<ConfigurationScreen> {
                                         child: DropdownButtonHideUnderline(
                                           child: DropdownButton<String>(
                                             value:
-                                                vm.availablePlugins.any(
+                                                state.plugins.any(
                                                   (p) => p.id == activePluginId,
                                                 )
                                                 ? activePluginId
-                                                : null, // Default to null (None)
+                                                : null,
                                             isExpanded: true,
                                             dropdownColor: const Color(
                                               0xFF1E293B,
@@ -166,9 +154,7 @@ class _ConfigurationScreenState extends State<ConfigurationScreen> {
                                                 value: null,
                                                 child: Text("None"),
                                               ),
-                                              ...vm.availablePlugins.map((
-                                                plugin,
-                                              ) {
+                                              ...state.plugins.map((plugin) {
                                                 return DropdownMenuItem<String>(
                                                   value: plugin.id,
                                                   child: Text(
@@ -180,12 +166,15 @@ class _ConfigurationScreenState extends State<ConfigurationScreen> {
                                                 );
                                               }),
                                             ],
-                                            onChanged: (value) async {
-                                              await vm.setActivePlugin(
-                                                stream.id,
-                                                value,
-                                              );
-                                              // No setState needed, VM updates will trigger rebuild
+                                            onChanged: (value) {
+                                              context
+                                                  .read<ConfigurationBloc>()
+                                                  .add(
+                                                    ConfigurationPluginSet(
+                                                      streamId: stream.id,
+                                                      pluginId: value,
+                                                    ),
+                                                  );
                                             },
                                           ),
                                         ),

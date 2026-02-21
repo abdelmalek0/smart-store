@@ -24,12 +24,7 @@ class _MainLayoutState extends State<MainLayout> {
     const DashboardScreen(),
     const ModelsScreen(),
     const StreamsScreen(),
-    PluginsScreen(
-      onModelChanged: (pluginName, modelPath) async {
-        // Global update logic or notify
-        debugPrint("Global model updated for $pluginName: $modelPath");
-      },
-    ),
+    const PluginsScreen(),
     const ConfigurationScreen(),
     const PlaybackScreen(),
     const EventsScreen(),

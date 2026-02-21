@@ -2,8 +2,9 @@ import 'dart:async';
 import 'dart:collection';
 import 'package:flutter/foundation.dart';
 import 'package:smart_store_linux/core/config/config_service.dart';
-
 import 'package:smart_store_linux/core/engine/pipeline.dart';
+import 'package:smart_store_linux/core/plugins/plugin_manager.dart';
+import 'package:smart_store_linux/core/rendering/manager/rendering_manager.dart';
 import 'package:smart_store_linux/core/streaming/stream_manager.dart';
 import 'package:smart_store_linux/ai/model_manager.dart';
 import 'package:smart_store_linux/core/engine/pipeline_registry.dart';
@@ -33,8 +34,8 @@ class PipelineManager extends ChangeNotifier {
       PipelineRegistry.instance.pipelines.any((p) => !p.isFrozen);
 
   /// Start all pipelines based on current configuration.
-  void startAll() async {
-    debugPrint("PipelineManager: Starting all pipelines...");
+  Future<void> startAll() async {
+    debugPrint('PipelineManager: Starting all pipelines...');
 
     // Clean up any frozen pipelines first
     if (PipelineRegistry.instance.pipelines.isNotEmpty) {
@@ -42,7 +43,7 @@ class PipelineManager extends ChangeNotifier {
         (p) => p.isFrozen,
       );
       if (hasFrozen) {
-        debugPrint("Clearing frozen pipelines before restart...");
+        debugPrint('Clearing frozen pipelines before restart...');
         await clearAll();
       }
     }
@@ -63,19 +64,23 @@ class PipelineManager extends ChangeNotifier {
 
       // Skip if already exists
       if (PipelineRegistry.instance.isRegistered(streamConfig.id)) {
-        debugPrint("[SKIP] Pipeline for ${streamConfig.id} already exists");
+        debugPrint('[SKIP] Pipeline for ${streamConfig.id} already exists');
         continue;
       }
 
-      // Create new Pipeline
-      final pipeline = Pipeline(streamId: streamConfig.id);
+      // Inject all manager dependencies — PipelineManager is the wiring point.
+      final pipeline = Pipeline(
+        streamId: streamConfig.id,
+        streamManager: StreamManager.instance,
+        pluginManager: PluginManager.instance,
+        renderingManager: RenderingManager.instance,
+        config: ConfigService.instance,
+      );
 
-      // Register
-      PipelineRegistry.instance.register(pipeline);
+      debugPrint('[INIT] Pipeline for stream: ${streamConfig.id}');
 
-      debugPrint("[INIT] Pipeline for stream: ${streamConfig.id}");
-
-      // Await initialization (Connects to StreamManager, activates Plugins)
+      // Await initialization (subscribes to streams, activates plugins)
+      // Note: Pipeline.initialize() registers itself in PipelineRegistry.
       await pipeline.initialize();
       notifyListeners();
 

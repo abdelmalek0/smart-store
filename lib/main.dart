@@ -4,15 +4,19 @@ import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:smart_store_linux/ui/utils/theme/app_theme.dart';
 
-import 'package:smart_store_linux/core/services/app/app_service.dart';
+import 'package:smart_store_linux/services/app_service.dart';
+import 'package:smart_store_linux/core/di/injection_container.dart';
 import 'package:smart_store_linux/ui/view/screens/main_layout.dart';
 import 'package:smart_store_linux/core/utils/permission_utils.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Initialize App Services (Config, System, Native Inference)
+  // 1. Initialize App Services (Config, System, Native Inference)
   await AppService.instance.init();
+
+  // 2. Register all dependencies with get_it
+  configureDependencies();
 
   if (Platform.isAndroid) {
     await PermissionUtils.requestAndroidPermissions();

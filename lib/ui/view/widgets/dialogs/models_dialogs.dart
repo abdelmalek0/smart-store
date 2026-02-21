@@ -1,11 +1,13 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:smart_store_linux/ui/utils/theme/app_theme.dart';
 import 'package:smart_store_linux/ui/view/widgets/modern/modern_widgets.dart';
 import 'package:smart_store_linux/core/config/models/model_config.dart';
 import 'package:smart_store_linux/core/utils/label_parser.dart';
-import 'package:smart_store_linux/ui/viewModels/models_viewmodel.dart';
+import 'package:smart_store_linux/presentation/blocs/models/models_bloc.dart';
+import 'package:smart_store_linux/presentation/blocs/models/models_event.dart';
 
 /// Dialog helpers extracted from ModelsScreen for single-responsibility.
 ///
@@ -13,9 +15,10 @@ import 'package:smart_store_linux/ui/viewModels/models_viewmodel.dart';
 ///   - Android: manual path entry for model files (.rknn) and labels (.txt)
 ///   - Linux/Desktop: uses FilePicker for both
 
-/// Show the "Add Model" dialog.
-void showAddModelDialog(BuildContext context, [ModelsViewModel? vm]) {
+/// Show the "Add Model" dialog. Dispatches [ModelFileAdded] to [ModelsBloc].
+void showAddModelDialog(BuildContext context) {
   String? selectedPath;
+  final bloc = context.read<ModelsBloc>();
 
   showDialog(
     context: context,
@@ -39,7 +42,6 @@ void showAddModelDialog(BuildContext context, [ModelsViewModel? vm]) {
                 icon: Icons.folder_open,
                 onPressed: () async {
                   if (Platform.isAndroid) {
-                    // Android: Manual path entry (scoped storage workaround)
                     final controller = TextEditingController();
                     final String? path = await showDialog<String>(
                       context: context,
@@ -109,14 +111,11 @@ void showAddModelDialog(BuildContext context, [ModelsViewModel? vm]) {
                             ),
                           );
                         } else {
-                          setState(() {
-                            selectedPath = path;
-                          });
+                          setState(() => selectedPath = path);
                         }
                       }
                     }
                   } else {
-                    // Desktop: Use file picker
                     try {
                       FilePickerResult? result = await FilePicker.platform
                           .pickFiles(
@@ -124,9 +123,7 @@ void showAddModelDialog(BuildContext context, [ModelsViewModel? vm]) {
                             allowedExtensions: ['onnx'],
                           );
                       if (result != null && result.files.single.path != null) {
-                        setState(() {
-                          selectedPath = result.files.single.path;
-                        });
+                        setState(() => selectedPath = result.files.single.path);
                       }
                     } catch (e) {
                       debugPrint("Error picking file: $e");
@@ -172,7 +169,7 @@ void showAddModelDialog(BuildContext context, [ModelsViewModel? vm]) {
             TextButton(
               onPressed: selectedPath != null
                   ? () {
-                      vm?.addModel(selectedPath!);
+                      bloc.add(ModelFileAdded(selectedPath!));
                       Navigator.pop(context);
                     }
                   : null,
@@ -193,11 +190,9 @@ void showAddModelDialog(BuildContext context, [ModelsViewModel? vm]) {
 }
 
 /// Show the "Upload Labels" dialog for a model.
-void showUploadLabelsDialog(
-  BuildContext context,
-  ModelConfig model,
-  ModelsViewModel vm,
-) {
+void showUploadLabelsDialog(BuildContext context, ModelConfig model) {
+  final bloc = context.read<ModelsBloc>();
+
   showDialog(
     context: context,
     builder: (context) => AlertDialog(
@@ -233,7 +228,6 @@ void showUploadLabelsDialog(
             ),
           ),
           const SizedBox(height: 16),
-          // Current status
           if (model.labels.isNotEmpty)
             Container(
               padding: const EdgeInsets.all(8),
@@ -267,17 +261,15 @@ void showUploadLabelsDialog(
       actions: [
         if (model.labels.isNotEmpty)
           TextButton(
-            onPressed: () async {
-              await vm.updateModelLabels(model.id, {});
-              if (context.mounted) {
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Custom labels removed'),
-                    backgroundColor: Color(0xFF6B7280),
-                  ),
-                );
-              }
+            onPressed: () {
+              bloc.add(ModelLabelsUpdated(modelId: model.id, labels: {}));
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Custom labels removed'),
+                  backgroundColor: Color(0xFF6B7280),
+                ),
+              );
             },
             child: const Text(
               "Clear Labels",
@@ -289,7 +281,7 @@ void showUploadLabelsDialog(
           child: const Text("Cancel"),
         ),
         TextButton(
-          onPressed: () => _pickAndUploadLabels(context, model, vm),
+          onPressed: () => _pickAndUploadLabels(context, model, bloc),
           child: const Text(
             "Upload File",
             style: TextStyle(color: AppTheme.accent),
@@ -300,17 +292,14 @@ void showUploadLabelsDialog(
   );
 }
 
-/// Pick and parse a labels file — platform-aware.
-/// Android: manual path entry; Desktop: FilePicker.
 Future<void> _pickAndUploadLabels(
   BuildContext context,
   ModelConfig model,
-  ModelsViewModel vm,
+  ModelsBloc bloc,
 ) async {
-  Navigator.pop(context); // Close dialog first
+  Navigator.pop(context);
 
   if (Platform.isAndroid) {
-    // Android: Manual path entry (scoped storage workaround)
     final controller = TextEditingController();
     final String? path = await showDialog<String>(
       context: context,
@@ -357,10 +346,9 @@ Future<void> _pickAndUploadLabels(
 
     if (path != null && path.isNotEmpty) {
       if (!context.mounted) return;
-      await _processLabelsFile(context, path, model, vm);
+      await _processLabelsFile(context, path, model, bloc);
     }
   } else {
-    // Desktop: Use file picker
     try {
       FilePickerResult? result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
@@ -368,7 +356,12 @@ Future<void> _pickAndUploadLabels(
       );
       if (result != null && result.files.single.path != null) {
         if (!context.mounted) return;
-        await _processLabelsFile(context, result.files.single.path!, model, vm);
+        await _processLabelsFile(
+          context,
+          result.files.single.path!,
+          model,
+          bloc,
+        );
       }
     } catch (e) {
       debugPrint("Error picking file: $e");
@@ -376,12 +369,11 @@ Future<void> _pickAndUploadLabels(
   }
 }
 
-/// Process and save labels from file.
 Future<void> _processLabelsFile(
   BuildContext context,
   String path,
   ModelConfig model,
-  ModelsViewModel vm,
+  ModelsBloc bloc,
 ) async {
   try {
     final file = File(path);
@@ -412,9 +404,7 @@ Future<void> _processLabelsFile(
       return;
     }
 
-    // debugPrint("[LABELS UPLOAD] Model ID: ${model.id}, Path: ${model.path}");
-    // debugPrint("[LABELS UPLOAD] Parsed ${labels.length} labels: $labels");
-    await vm.updateModelLabels(model.id, labels);
+    bloc.add(ModelLabelsUpdated(modelId: model.id, labels: labels));
 
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(

@@ -8,17 +8,13 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
-import 'package:smart_store_linux/core/streaming/video_bridge.dart';
+import 'package:smart_store_linux/core/streaming/bridge/video_bridge.dart';
 
 import '../video_capture.dart';
 
 /// Android-specific video capture implementation
-///
-/// Architecture:
-/// - Dart (this class) ← MethodChannel → Kotlin (FFmpegVideoPlugin)
-/// - Kotlin uses JavaCPP FFmpeg bindings for video decoding
-/// - Frames are rendered to native Android TextureView
 class AndroidVideoCapture implements VideoCapture {
+  final VideoBridge _bridge = VideoBridge();
   @override
   Future<VideoCaptureResult> open(String url) async {
     debugPrint("📱 Android: Opening video stream");
@@ -28,7 +24,7 @@ class AndroidVideoCapture implements VideoCapture {
     await _diagnosticSocketCheck(url);
 
     try {
-      final result = await VideoBridge.openVideo(url);
+      final result = await _bridge.openVideo(url);
       if (result != null) {
         final streamId = result['videoId'] as int;
         final textureId = result['textureId'] as int;
@@ -48,7 +44,7 @@ class AndroidVideoCapture implements VideoCapture {
   @override
   Future<VideoCaptureFrame?> getFrame(int streamId) async {
     try {
-      final frameData = await VideoBridge.getFrame(streamId);
+      final frameData = await _bridge.getFrame(streamId);
 
       if (frameData == null) {
         return null; // No frame available
@@ -69,7 +65,7 @@ class AndroidVideoCapture implements VideoCapture {
   @override
   Future<void> release(int streamId) async {
     try {
-      await VideoBridge.releaseVideo(streamId);
+      await _bridge.releaseVideo(streamId);
       debugPrint("✓ Android: Video stream $streamId released");
     } catch (e) {
       debugPrint("❌ Android: Error releasing stream - $e");

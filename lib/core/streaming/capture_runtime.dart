@@ -7,7 +7,7 @@ import 'package:smart_store_linux/core/models/frames.dart';
 
 import 'package:smart_store_linux/core/streaming/capture/capture_isolate.dart';
 import 'package:smart_store_linux/core/streaming/capture/isolate_params.dart';
-import 'package:smart_store_linux/core/streaming/video_bridge.dart';
+import 'package:smart_store_linux/core/streaming/bridge/video_bridge.dart';
 import 'package:native_onnx/native_onnx.dart';
 
 /// Controls the Capture Isolate lifecycle and raw message parsing.
@@ -42,6 +42,9 @@ class CaptureRuntime {
     this.onLabelsReceived,
     this.onInitComplete,
   });
+
+  // Platform bridge — used for frame flushing on lag drop
+  final VideoBridge _bridge = VideoBridge();
 
   /// Spawn the capture isolate
   Future<void> start(String? modelPath) async {
@@ -117,9 +120,8 @@ class CaptureRuntime {
           // If we simply drop it here, the native buffer fills up with unconsumed frames.
           // We must tell Native to "consume" it (showFrame removes it from buffer).
           if (_textureId != null) {
-            // Use VideoBridge to handle platform-specific flushing
             try {
-              VideoBridge.showFrame(_textureId!, timestamp);
+              _bridge.showFrame(_textureId!, timestamp);
             } catch (e) {
               // Ignore errors during flush
             }
