@@ -120,10 +120,4 @@ if(EXISTS "${TFLITE_SOURCE}")
           COMPONENT Runtime)
 endif()
 
-# --- CUSTOM ONNX RUNTIME (GPU) INSTALLATION ---
-
-# 1. Define source directory for your libs (linux/libs)
-set(MY_ORT_LIBS "${CMAKE_CURRENT_SOURCE_DIR}/libs")
-
-# 2. Gather specific ONNX Runtime 1.23.2 files
-# Using GLOB is risky in C++ source but okay for install steps to catch version changes
+# (End of file)

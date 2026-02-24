@@ -55,3 +55,6 @@ assets/*.onnx
 assets/*.txt
 
 android/*.hprof
+
+# Ignore voluminous ONNX Runtime shared libraries in the native package
+packages/native_onnx/linux/libs/*.so*

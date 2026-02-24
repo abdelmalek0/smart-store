@@ -16,10 +16,6 @@ dependencies:
   get_it: ^8.0.2
   # File system
   path_provider: ^2.1.1
-  # (Optional) For decoding images to show on screen
-  # Video dependencies
-  # fvp: ^0.35.1 (Removed)
-  # video_player: ^2.8.1 (Removed)
 
   # Utilities
   shared_preferences: ^2.2.0
@@ -31,11 +27,15 @@ dependencies:
   
   # Icons
   cupertino_icons: ^1.0.2
+
+  # Native
   ffi: ^2.1.4
   native_onnx:
     path: ./packages/native_onnx
   native_rknn:
     path: ./packages/native_rknn
+
+  
   file_picker: ^10.3.8
   permission_handler: ^12.0.1
   json_annotation: ^4.10.0
