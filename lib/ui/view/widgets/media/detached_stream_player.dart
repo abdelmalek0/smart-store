@@ -118,18 +118,18 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
               final frame = snapshot.data!;
               _controller.onFrameTick(); // Maintenance
 
-              // Trigger render
-              _controller.showFrame(frame.decodeStartMs).then((success) {
-                if (success && mounted) {
-                  // Only update detections if we successfully showed the video frame
-                  setState(() {
-                    _currentDetections = frame.detections;
-                    _currentFrameWidth = frame.width;
-                    _currentFrameHeight = frame.height;
-                    _currentLabels = pipeline.modelLabels;
-                  });
-                }
-              });
+              // Optimistically update detections synchronously with this build pass.
+              // This guarantees the UI draws the new boxes in the exact same
+              // vsync frame that the new video frame is requested to be shown.
+              _currentDetections = frame.detections;
+              _currentFrameWidth = frame.width;
+              _currentFrameHeight = frame.height;
+              _currentLabels = pipeline.modelLabels;
+
+              // Request native side to show the specific video frame.
+              // We do not await this, letting the texture update happen 
+              // autonomously while we render the boxes right now.
+              _controller.showFrame(frame.decodeStartMs);
             }
 
             return Stack(

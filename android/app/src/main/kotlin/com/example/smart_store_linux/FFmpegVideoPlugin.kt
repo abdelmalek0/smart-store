@@ -400,6 +400,16 @@ class FFmpegStream(
         // Switch to synchronized mode on first command
         autoDisplay.set(false)
         
+        // 1. Clean up (drop) all older frames and recycle their bitmaps
+        val oldKeys = frameBuffer.keys().filter { it < timestamp }
+        if (oldKeys.isNotEmpty()) {
+            android.util.Log.d("FFmpegStream", "Dropping ${oldKeys.size} old frames before $timestamp")
+            for (oldKey in oldKeys) {
+                frameBuffer.remove(oldKey)?.recycle()
+            }
+        }
+
+        // 2. Safely get the requested frame
         val bitmap = frameBuffer.remove(timestamp) // Get and remove (consume)
         if (bitmap != null) {
             android.util.Log.d("FFmpegStream", "Showing frame $timestamp")
@@ -423,7 +433,7 @@ class FFmpegStream(
                 } catch (e: Exception) {
                     android.util.Log.e("FFmpegStream", "Render error: $e")
                 } finally {
-                    bitmap.recycle()
+                    bitmap.recycle() // Important! Recycle the bitmap we just rendered
                     latch.countDown()
                 }
             }
@@ -431,10 +441,39 @@ class FFmpegStream(
             latch.await(50, TimeUnit.MILLISECONDS)
             return true
         } else {
+             // 3. Fallback to newest available frame if requested one is missing
              val keys = frameBuffer.keys().toList().sorted()
-             val min = keys.firstOrNull() ?: -1
-             val max = keys.lastOrNull() ?: -1
-             android.util.Log.w("FFmpegStream", "Frame $timestamp not found. Buffer Size: ${frameBuffer.size}. Range: [$min - $max]")
+             if (keys.isNotEmpty()) {
+                 val fallbackKey = keys.last() // always get newest available since older ones are dropped
+                 val fallbackBitmap = frameBuffer.remove(fallbackKey)
+                 if (fallbackBitmap != null) {
+                     android.util.Log.w("FFmpegStream", "Frame $timestamp missing. Fallback to $fallbackKey")
+                     val latch = CountDownLatch(1)
+                     renderHandler.post {
+                         try {
+                             synchronized(this) {
+                                 if (surface != null && surface!!.isValid) {
+                                     val rect = android.graphics.Rect(0, 0, 1280, 720)
+                                     val canvas = surface!!.lockCanvas(rect)
+                                     if (canvas != null) {
+                                         canvas.drawBitmap(fallbackBitmap, null, rect, null)
+                                         surface!!.unlockCanvasAndPost(canvas)
+                                     }
+                                 }
+                             }
+                         } catch (e: Exception) {
+                             android.util.Log.e("FFmpegStream", "Render error fallback: $e")
+                         } finally {
+                             fallbackBitmap.recycle()
+                             latch.countDown()
+                         }
+                     }
+                     latch.await(50, TimeUnit.MILLISECONDS)
+                     return true
+                 }
+             }
+             
+             android.util.Log.e("FFmpegStream", "Frame $timestamp not found and buffer empty")
              return false
         }
     }
