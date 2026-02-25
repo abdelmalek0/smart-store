@@ -1,4 +1,4 @@
-import 'package:smart_store_linux/data/dto/model_config_dto.dart';
+import 'package:smart_store_linux/data/models/model_config_dto.dart';
 import 'package:smart_store_linux/domain/entities/model_entity.dart';
 
 /// Maps between [ModelConfigDto] (data layer) and [ModelEntity] (domain layer).

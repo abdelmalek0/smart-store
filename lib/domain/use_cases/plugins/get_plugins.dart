@@ -1,4 +1,4 @@
-import 'package:smart_store_linux/services/config_service.dart';
+import 'package:smart_store_linux/application/config/config_service.dart';
 import 'package:smart_store_linux/domain/entities/plugin_entity.dart';
 
 /// Returns the list of all available plugin definitions.

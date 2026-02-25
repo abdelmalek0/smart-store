@@ -1,4 +1,4 @@
-import 'package:smart_store_linux/services/app_service.dart';
+import 'package:smart_store_linux/application/services/app_service.dart';
 
 /// Toggles the inference engine on or off.
 class ToggleEngine {

@@ -1,4 +1,4 @@
-import 'package:smart_store_linux/services/config_service.dart';
+import 'package:smart_store_linux/application/config/config_service.dart';
 
 /// Assigns an active plugin to a stream (or clears it by passing null).
 class SetActivePlugin {

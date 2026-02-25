@@ -1,5 +1,5 @@
-import 'package:smart_store_linux/services/config_service.dart';
-import 'package:smart_store_linux/core/config/models/stream_config.dart';
+import 'package:smart_store_linux/application/config/config_service.dart';
+import 'package:smart_store_linux/domain/entities/config/stream_config.dart';
 
 /// Returns the current list of configured streams.
 class GetStreams {

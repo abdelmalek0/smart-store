@@ -2,12 +2,12 @@ import 'dart:io' show Platform, exit;
 import 'package:flutter/material.dart';
 
 import 'package:window_manager/window_manager.dart';
-import 'package:smart_store_linux/ui/utils/theme/app_theme.dart';
+import 'package:smart_store_linux/presentation/common/utils/theme/app_theme.dart';
 
-import 'package:smart_store_linux/services/app_service.dart';
-import 'package:smart_store_linux/core/di/injection_container.dart';
-import 'package:smart_store_linux/ui/view/screens/main_layout.dart';
-import 'package:smart_store_linux/core/utils/permission_utils.dart';
+import 'package:smart_store_linux/application/services/app_service.dart';
+import 'package:smart_store_linux/application/di/injection_container.dart';
+import 'package:smart_store_linux/presentation/common/layout/main_layout.dart';
+import 'package:smart_store_linux/infrastructure/system/utils/permission_utils.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();

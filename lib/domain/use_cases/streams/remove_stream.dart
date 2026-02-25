@@ -1,4 +1,4 @@
-import 'package:smart_store_linux/services/config_service.dart';
+import 'package:smart_store_linux/application/config/config_service.dart';
 
 /// Removes a stream by its [streamId] from the configuration.
 class RemoveStream {

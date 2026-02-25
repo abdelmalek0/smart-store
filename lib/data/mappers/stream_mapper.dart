@@ -1,4 +1,4 @@
-import 'package:smart_store_linux/data/dto/stream_config_dto.dart';
+import 'package:smart_store_linux/data/models/stream_config_dto.dart';
 import 'package:smart_store_linux/domain/entities/stream_entity.dart';
 
 /// Maps between [StreamConfigDto] (data layer) and [StreamEntity] (domain layer).

@@ -1,5 +1,5 @@
-import 'package:smart_store_linux/services/config_service.dart';
-import 'package:smart_store_linux/core/config/models/model_config.dart';
+import 'package:smart_store_linux/application/config/config_service.dart';
+import 'package:smart_store_linux/domain/entities/config/model_config.dart';
 
 /// Returns the current list of configured AI models.
 class GetModels {

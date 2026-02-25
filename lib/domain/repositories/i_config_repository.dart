@@ -1,4 +1,4 @@
-import 'package:smart_store_linux/core/config/models/app_config.dart';
+import 'package:smart_store_linux/domain/entities/config/app_config.dart';
 
 /// Abstract contract for application configuration persistence.
 ///
