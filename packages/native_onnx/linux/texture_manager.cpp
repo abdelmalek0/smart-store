@@ -3,6 +3,8 @@
 #include <opencv2/core/opengl.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/imgcodecs.hpp>
+#include <opencv2/cudaimgproc.hpp>
+#include <opencv2/cudawarping.hpp>
 
 // OpenGL extension functions for PBO (Pixel Buffer Objects)
 // These may not be in the standard GL/gl.h
@@ -30,13 +32,27 @@ static bool gl_funcs_loaded = false;
 
 // Load GL extension functions dynamically
 #include <GL/glx.h>
+#include <EGL/egl.h>
+#include <EGL/eglext.h>
+
+// EGL extension function pointers (strictly for EGLImage mapping)
+typedef EGLImageKHR (*PFNEGLCREATEIMAGEKHRPROC)(EGLDisplay dpy, EGLContext ctx, EGLenum target, EGLClientBuffer buffer, const EGLint *attrib_list);
+typedef EGLBoolean (*PFNEGLDESTROYIMAGEKHRPROC)(EGLDisplay dpy, EGLImageKHR image);
+static PFNEGLCREATEIMAGEKHRPROC eglCreateImageKHR_ptr = nullptr;
+static PFNEGLDESTROYIMAGEKHRPROC eglDestroyImageKHR_ptr = nullptr;
+
 static void loadGLFunctions() {
     if (gl_funcs_loaded) return;
     
+    // Load OpenGL PBO functions (standard support)
     glGenBuffers_ptr = (PFNGLGENBUFFERSPROC)glXGetProcAddressARB((const GLubyte*)"glGenBuffers");
     glBindBuffer_ptr = (PFNGLBINDBUFFERPROC)glXGetProcAddressARB((const GLubyte*)"glBindBuffer");
     glBufferData_ptr = (PFNGLBUFFERDATAPROC)glXGetProcAddressARB((const GLubyte*)"glBufferData");
     glDeleteBuffers_ptr = (PFNGLDELETEBUFFERSPROC)glXGetProcAddressARB((const GLubyte*)"glDeleteBuffers");
+    
+    // Load EGL functions for native NVIDIA EGLImage interop
+    eglCreateImageKHR_ptr = (PFNEGLCREATEIMAGEKHRPROC)eglGetProcAddress("eglCreateImageKHR");
+    eglDestroyImageKHR_ptr = (PFNEGLDESTROYIMAGEKHRPROC)eglGetProcAddress("eglDestroyImageKHR");
     
     gl_funcs_loaded = true;
 }
@@ -124,6 +140,12 @@ bool TextureManager::registerCudaInterop(TextureInfo* info) {
     }
     
     // Try multiple registration flag combinations for TEXTURE
+    // ========================================
+    // PATH 1: Standard CUDA-GL Interop (Preferred for Forced-NVIDIA Context)
+    // ========================================
+    // Since the user is forcing `__GLX_VENDOR_LIBRARY_NAME=nvidia`, standard GL interop
+    // is usually the most stable and avoids EGL-specific mapping "unknown errors".
+    
     unsigned int flags[] = {
         cudaGraphicsRegisterFlagsWriteDiscard,
         cudaGraphicsRegisterFlagsSurfaceLoadStore,
@@ -134,7 +156,8 @@ bool TextureManager::registerCudaInterop(TextureInfo* info) {
         "SurfaceLoadStore", 
         "None"
     };
-    
+
+    std::cout << "[TextureManager] Attempting standard CUDA-GL interop path..." << std::endl;
     for (int i = 0; i < 3; i++) {
         err = cudaGraphicsGLRegisterImage(
             &info->cuda_resource,
@@ -145,58 +168,53 @@ bool TextureManager::registerCudaInterop(TextureInfo* info) {
         
         if (err == cudaSuccess) {
             info->interop_registered = true;
+            info->use_dma_buf = false; // Not strictly EGL/DMA-buf path
             std::cout << "[TextureManager] ✓ CUDA-GL texture interop registered (flags=" 
-                      << flag_names[i] << ") for GL texture " 
-                      << info->gl_texture_id << std::endl;
+                      << flag_names[i] << ")" << std::endl;
             return true;
         }
-        
-        // Clear the error state
         cudaGetLastError();
     }
-    
-    std::cout << "[TextureManager] Texture interop failed, trying PBO path..." << std::endl;
-    
+
     // ========================================
-    // PBO FALLBACK: Create a Pixel Buffer Object and register that
-    // PBO buffer interop often works when texture interop fails
+    // PATH 2: NVIDIA EGLImage Interop (Fallback for Wayland)
     // ========================================
+    EGLDisplay egl_dpy = eglGetCurrentDisplay();
+    EGLContext egl_ctx = eglGetCurrentContext();
     
-    // Create PBO for this texture
-    int pbo_size = info->gl_width * info->gl_height * 4; // RGBA
-    glGenBuffers(1, &info->pbo_id);
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, info->pbo_id);
-    glBufferData(GL_PIXEL_UNPACK_BUFFER, pbo_size, nullptr, GL_STREAM_DRAW);
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
-    
-    GLenum gl_error = glGetError();
-    if (gl_error != GL_NO_ERROR) {
-        std::cerr << "[TextureManager] Failed to create PBO: GL error " << gl_error << std::endl;
-        return false;
+    if (egl_dpy != EGL_NO_DISPLAY && egl_ctx != EGL_NO_CONTEXT && eglCreateImageKHR_ptr) {
+        std::cout << "[TextureManager] Falling back to NVIDIA EGLImageKHR interop..." << std::endl;
+        const EGLint attribs[] = { EGL_IMAGE_PRESERVED_KHR, EGL_TRUE, EGL_NONE };
+        
+        info->egl_image = eglCreateImageKHR_ptr(
+            egl_dpy, 
+            egl_ctx, 
+            EGL_GL_TEXTURE_2D_KHR, 
+            (EGLClientBuffer)(uintptr_t)info->gl_texture_id, 
+            attribs
+        );
+        
+        if (info->egl_image != EGL_NO_IMAGE_KHR) {
+            err = cudaGraphicsEGLRegisterImage(
+                &info->cuda_resource, 
+                info->egl_image, 
+                cudaGraphicsRegisterFlagsWriteDiscard
+            );
+            
+            if (err == cudaSuccess) {
+                info->interop_registered = true;
+                info->use_dma_buf = true;
+                std::cout << "[TextureManager] ✓ NVIDIA-EGL image interop registered" << std::endl;
+                return true;
+            } else {
+                std::cerr << "[TextureManager] cudaGraphicsEGLRegisterImage failed: " << cudaGetErrorString(err) << std::endl;
+                if (eglDestroyImageKHR_ptr) eglDestroyImageKHR_ptr(egl_dpy, info->egl_image);
+                info->egl_image = nullptr;
+            }
+        }
     }
     
-    // Try to register PBO with CUDA
-    err = cudaGraphicsGLRegisterBuffer(
-        &info->pbo_cuda_resource,
-        info->pbo_id,
-        cudaGraphicsRegisterFlagsWriteDiscard
-    );
-    
-    if (err == cudaSuccess) {
-        info->pbo_registered = true;
-        info->use_pbo_path = true;
-        std::cout << "[TextureManager] ✓ CUDA-GL PBO interop registered for texture " 
-                  << info->gl_texture_id << " (PBO=" << info->pbo_id << ")" << std::endl;
-        return true;
-    }
-    
-    std::cerr << "[TextureManager] PBO interop also failed: " << cudaGetErrorString(err) << std::endl;
-    
-    // Clean up PBO if registration failed
-    glDeleteBuffers(1, &info->pbo_id);
-    info->pbo_id = 0;
-    
-    std::cerr << "[TextureManager] All CUDA-GL interop registration attempts failed" << std::endl;
+    std::cerr << "[TextureManager] All NVIDIA-Native interop attempts failed" << std::endl;
     return false;
 }
 
@@ -299,9 +317,9 @@ bool TextureManager::setPendingGpuFrame(int texture_id, const cv::cuda::GpuMat& 
     info->frame_buffer[timestamp] = buffer_copy;
     
 
-    // 2. Auto-Play Mode (During Warmup)
-    // Limit buffer size (max 60 frames ~ 2 sec)
-    if (info->frame_buffer.size() > 60) {
+    // 2. Buffer Size Management
+    // Limit buffer size (max 15 frames ~ 0.5 sec) to reduce GPU memory pressure
+    if (info->frame_buffer.size() > 15) {
         // Remove oldest
         info->frame_buffer.erase(info->frame_buffer.begin());
     }
@@ -329,35 +347,44 @@ bool TextureManager::showFrame(int texture_id, int64_t timestamp) {
     auto it = info->frame_buffer.find(timestamp);
     if (it != info->frame_buffer.end()) {
         // Found! Set as pending for upload
-        // Clone effectively to ensure it survives erasure of source
-        info->pending_gpu_frame = it->second.clone();
+        info->pending_gpu_frame = it->second; // Move reference (ref-counted)
         info->has_pending_gpu_frame = true;
         
-        // Remove this frame and ALL older frames (consume buffer)
-        // Note: iterators to map elements (except the erased ones) remain valid
-        auto next_it = std::next(it);
-        info->frame_buffer.erase(info->frame_buffer.begin(), next_it);
+        // STRICT SYNC: When a frame is shown, discard everything OLDER than it.
+        // This prevents the system from ever "jumping back" if sync is slightly behind wall-time.
+        info->frame_buffer.erase(info->frame_buffer.begin(), ++it);
         
         return true;
     }
     
-    // Frame not found - use oldest available frame as fallback (UI is behind)
+    // Frame not found - use CLOSEST available frame as fallback (UI/Inference jitter)
     if (!info->frame_buffer.empty()) {
-        auto it_oldest = info->frame_buffer.begin();
+        auto it_next = info->frame_buffer.lower_bound(timestamp);
+        auto it_match = it_next;
+        
+        if (it_next == info->frame_buffer.end()) {
+            it_match = std::prev(it_next);
+        } else if (it_next != info->frame_buffer.begin()) {
+            auto it_prev = std::prev(it_next);
+            // Pick the one with smaller absolute difference
+            if (std::abs(it_next->first - timestamp) > std::abs(it_prev->first - timestamp)) {
+                it_match = it_prev;
+            }
+        }
         
         // Log fallback usage periodically
         static int fallback_count = 0;
-        if (++fallback_count % 60 == 0) {
-            std::cout << "[TextureManager] Fallback: Using frame " << it_oldest->first 
-                      << " (requested " << timestamp << "), buffer size: " 
-                      << info->frame_buffer.size() << std::endl;
+        if (++fallback_count % 300 == 0) { // Reduced logging frequency
+            std::cout << "[TextureManager] Sync Fallback: Using " << it_match->first 
+                      << " for requested " << timestamp << " (Diff: " 
+                      << (it_match->first - timestamp) << "ms)" << std::endl;
         }
         
-        info->pending_gpu_frame = it_oldest->second.clone();
+        info->pending_gpu_frame = it_match->second; // Move reference
         info->has_pending_gpu_frame = true;
         
-        // Remove this frame from buffer
-        info->frame_buffer.erase(it_oldest);
+        // Discard everything OLDER than the frame we just matched (Strict Sync)
+        info->frame_buffer.erase(info->frame_buffer.begin(), ++it_match);
         
         return true;
     }
@@ -382,75 +409,133 @@ bool TextureManager::uploadPendingGpuFrame(int texture_id) {
     {
         std::lock_guard<std::mutex> lock(*info->frame_mutex);
         if (!info->has_pending_gpu_frame) return false;
-        frame_to_upload = info->pending_gpu_frame.clone();
+        frame_to_upload = info->pending_gpu_frame; // Copy reference (GpuMat is ref-counted)
+        info->pending_gpu_frame = cv::cuda::GpuMat(); // Clear source
         info->has_pending_gpu_frame = false;
     }
     
     if (frame_to_upload.empty()) return false;
     
-    // 1. Try CUDA-GL interop if not seen before
+    // 1. Try CUDA-GL or EGL interop if not seen before
     if (!info->interop_registered && !info->interop_attempted) {
         info->interop_attempted = true;
         if (!registerCudaInterop(info)) {
             // Only log this once per texture
             std::cout << "[TextureManager] Texture " << texture_id 
-                      << ": CUDA-GL interop unavailable, using direct GL upload" << std::endl;
+                      << ": CUDA-GL/EGL interop unavailable, using fallback path" << std::endl;
         }
     }
     
-    // 2. PATH A: PBO-based GPU transfer (when texture interop fails but PBO works)
-    if (info->use_pbo_path && info->pbo_registered) {
-        static bool pbo_logged = false;
-        if (!pbo_logged) {
-            std::cout << "[TextureManager] Using PBO path for GPU transfer" << std::endl;
-            pbo_logged = true;
+    // 2. PATH A: Direct NVIDIA Texture Interop (True Zero-Copy)
+    if (info->interop_registered && info->cuda_resource) {
+        // DYNAMIC RESOLUTION ADAPTATION:
+        // If the frame resolution changed (or was initially incorrect), we MUST 
+        // re-allocate the GL texture and re-register the interop.
+        if (frame_to_upload.cols != info->gl_width || frame_to_upload.rows != info->gl_height) {
+            std::cout << "[TextureManager] Dynamic Resize: Frame (" << frame_to_upload.cols << "x" << frame_to_upload.rows 
+                      << ") vs Texture (" << info->gl_width << "x" << info->gl_height 
+                      << "). Re-allocating..." << std::endl;
+            
+            // 1. Clean up old resources (CRITICAL: Must unregister before deleting GL texture)
+            cudaGraphicsUnregisterResource(info->cuda_resource);
+            info->cuda_resource = nullptr;
+            
+            if (info->use_dma_buf && info->egl_image && eglDestroyImageKHR_ptr) {
+                EGLDisplay egl_dpy = eglGetCurrentDisplay();
+                if (egl_dpy != EGL_NO_DISPLAY) eglDestroyImageKHR_ptr(egl_dpy, info->egl_image);
+                info->egl_image = nullptr;
+            }
+            
+            // 2. Re-allocate GL Texture at the correct size
+            glBindTexture(GL_TEXTURE_2D, info->gl_texture_id);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, frame_to_upload.cols, frame_to_upload.rows, 0, 
+                         GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+            
+            info->gl_width = frame_to_upload.cols;
+            info->gl_height = frame_to_upload.rows;
+            
+            // 3. Re-register for the new size
+            info->interop_registered = false;
+            if (!registerCudaInterop(info)) {
+                std::cerr << "[TextureManager] Failed to re-register interop after dynamic resize!" << std::endl;
+                return false;
+            }
         }
-        
-        // Map PBO to CUDA
-        cudaError_t err = cudaGraphicsMapResources(1, &info->pbo_cuda_resource, 0);
-        if (err != cudaSuccess) {
-            std::cerr << "[TextureManager] PBO map failed: " << cudaGetErrorString(err) << std::endl;
-            goto cpu_fallback;
+
+        cudaError_t err = cudaGraphicsMapResources(1, &info->cuda_resource, 0);
+        if (err == cudaSuccess) {
+            cudaArray_t texture_ptr;
+            err = cudaGraphicsSubResourceGetMappedArray(&texture_ptr, info->cuda_resource, 0, 0);
+            if (err == cudaSuccess) {
+                // EXPLICIT HARDWARE COPY: Push NVIDIA GpuMat to NVIDIA Texture Array
+                err = cudaMemcpy2DToArray(
+                    texture_ptr, 0, 0, 
+                    frame_to_upload.data, frame_to_upload.step,
+                    frame_to_upload.cols * 4, frame_to_upload.rows, 
+                    cudaMemcpyDeviceToDevice
+                );
+                
+                if (err != cudaSuccess) {
+                    std::cerr << "[TextureManager] cudaMemcpy2DToArray FAILED (" 
+                              << frame_to_upload.cols << "x" << frame_to_upload.rows << " step=" << frame_to_upload.step 
+                              << "): " << cudaGetErrorString(err) << std::endl;
+                    cudaGraphicsUnmapResources(1, &info->cuda_resource, 0);
+                    goto cpu_fallback_with_log;
+                }
+                
+                // SYNCHRONIZATION: Ensure CUDA GPU write finished before GL samples it
+                cudaGraphicsUnmapResources(1, &info->cuda_resource, 0);
+                
+                // GL SYNC: Flush GL command queue (lighter than glFinish)
+                glFlush();
+                
+                info->width = frame_to_upload.cols;
+                info->height = frame_to_upload.rows;
+                info->has_valid_frame = true;
+                
+                // Log success occasionally
+                static int success_count = 0;
+                if (++success_count % 600 == 0) {
+                    std::cout << "[TextureManager] ✓ Zero-Copy Push (" << frame_to_upload.cols << "x" << frame_to_upload.rows 
+                              << ") successful" << std::endl;
+                }
+                return true;
+            } else {
+                std::cerr << "[TextureManager] cudaGraphicsSubResourceGetMappedArray failed: " << cudaGetErrorString(err) << std::endl;
+                cudaGraphicsUnmapResources(1, &info->cuda_resource, 0);
+            }
+        } else {
+            // Mapping failed - UNREGISTER and retry other path next frame
+            std::cerr << "[TextureManager] cudaGraphicsMapResources failed: " << cudaGetErrorString(err) << std::endl;
+            
+            // Clean up to allow a fresh registration attempt
+            cudaGraphicsUnregisterResource(info->cuda_resource);
+            info->cuda_resource = nullptr;
+            
+            if (info->use_dma_buf && info->egl_image && eglDestroyImageKHR_ptr) {
+                EGLDisplay egl_dpy = eglGetCurrentDisplay();
+                if (egl_dpy != EGL_NO_DISPLAY) {
+                    eglDestroyImageKHR_ptr(egl_dpy, info->egl_image);
+                }
+                info->egl_image = nullptr;
+            }
+            
+            info->interop_registered = false;
+            info->interop_attempted = false; // Allow retry in registerCudaInterop
         }
-        
-        // Get device pointer to PBO
-        void* pbo_ptr = nullptr;
-        size_t pbo_size = 0;
-        err = cudaGraphicsResourceGetMappedPointer(&pbo_ptr, &pbo_size, info->pbo_cuda_resource);
-        if (err != cudaSuccess) {
-            cudaGraphicsUnmapResources(1, &info->pbo_cuda_resource, 0);
-            std::cerr << "[TextureManager] PBO get pointer failed: " << cudaGetErrorString(err) << std::endl;
-            goto cpu_fallback;
-        }
-        
-        // Copy from GPU frame to PBO (GPU-to-GPU transfer!)
-        cudaMemcpy2D(pbo_ptr, frame_to_upload.cols * 4,
-                     frame_to_upload.data, frame_to_upload.step,
-                     frame_to_upload.cols * 4, frame_to_upload.rows,
-                     cudaMemcpyDeviceToDevice);
-        
-        // Unmap PBO from CUDA
-        cudaGraphicsUnmapResources(1, &info->pbo_cuda_resource, 0);
-        
-        // Now use OpenGL to copy from PBO to texture (GL-side operation, very fast)
-        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, info->pbo_id);
-        glBindTexture(GL_TEXTURE_2D, info->gl_texture_id);
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 
-                        frame_to_upload.cols, frame_to_upload.rows,
-                        GL_RGBA, GL_UNSIGNED_BYTE, 0);  // 0 = read from bound PBO
-        glBindTexture(GL_TEXTURE_2D, 0);
-        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
-        
-        info->width = frame_to_upload.cols;
-        info->height = frame_to_upload.rows;
-        info->has_valid_frame = true;
-        
-        return true;
     }
     
-    // 3. PATH B: Direct CPU fallback (slowest - but always works)
-cpu_fallback:
+    // 3. PATH B: CPU Fallback (Wait, why are we here? App is ON NVIDIA)
+    // If we are here, something went wrong with the NVIDIA Interop.
+    // Try slow path to at least see if pixels are valid.
+cpu_fallback_with_log:
     {
+        static bool fallback_warned = false;
+        if (!fallback_warned) {
+            std::cout << "[TextureManager] WARNING: Direct interop failed or not registered. Using slow fallback." << std::endl;
+            fallback_warned = true;
+        }
+        
         cv::Mat cpu_frame;
         frame_to_upload.download(cpu_frame);
         
@@ -535,6 +620,22 @@ void TextureManager::releaseTexture(int texture_id) {
     // Unregister CUDA interop first
     if (info.interop_registered && info.cuda_resource) {
         cudaGraphicsUnregisterResource(info.cuda_resource);
+        info.cuda_resource = nullptr;
+    }
+    
+    if (info.use_dma_buf && info.egl_image && eglDestroyImageKHR_ptr) {
+        EGLDisplay egl_dpy = eglGetCurrentDisplay();
+        if (egl_dpy != EGL_NO_DISPLAY) {
+            eglDestroyImageKHR_ptr(egl_dpy, info.egl_image);
+        }
+        info.egl_image = nullptr;
+    }
+    
+    if (info.pbo_id) {
+        if (info.pbo_registered && info.pbo_cuda_resource) {
+            cudaGraphicsUnregisterResource(info.pbo_cuda_resource);
+        }
+        if (glDeleteBuffers_ptr) glDeleteBuffers_ptr(1, &info.pbo_id);
     }
     
     if (info.gl_texture_id) {

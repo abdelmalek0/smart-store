@@ -22,12 +22,15 @@ class InferenceInput {
   final int height;
   // Unique ID for the stream/request to help with debugging or matching
   final String streamId;
+  // Native video ID for zero-copy optimized inference
+  final int? videoId;
 
   InferenceInput({
     required this.imageBytes,
     required this.width,
     required this.height,
     this.streamId = '',
+    this.videoId,
   });
 }
 
@@ -49,4 +52,8 @@ abstract class InferenceBackend {
 
   /// Unload a model
   void unloadModel(int modelId);
+
+  /// Get class labels from the loaded model metadata
+  /// Returns empty map if no labels found
+  Map<int, String> getLabels(int modelId);
 }

@@ -62,6 +62,11 @@ struct VideoContext {
     cv::cuda::GpuMat last_rgba_gpu;  // Store last RGBA frame on GPU
     bool has_gpu_frame = false;       // Flag indicating GPU frame is available
     
+    // Persistent buffers to avoid per-frame GPU allocations
+    cv::cuda::GpuMat rgb_gpu_buf;
+    cv::cuda::GpuMat rgba_gpu_buf;
+    cv::cuda::GpuMat nv12_gpu_buf;
+    
     // Per-stream NV12 conversion buffer (thread-safe alternative to static)
     std::vector<uint8_t> nv12_buffer;
 #else
@@ -78,7 +83,8 @@ public:
     static int64_t Open(const char* url);
     static void Release(int64_t video_id);
     static int GetFrame(int64_t video_id, uint8_t** out_buffer, int* width, int* height, int64_t* out_timestamp, bool add_to_texture_buffer = true);
-    
+    static double GetFPS(int64_t video_id);
+
     // Helper to access context securely for inference bridge internal use
     static std::shared_ptr<VideoContext> GetContext(int64_t video_id);
     

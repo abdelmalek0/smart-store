@@ -172,6 +172,16 @@ class InferenceWorker {
           debugPrint(
             "✓ Model loaded in ${loadStart.elapsedMilliseconds}ms (ID: $modelId)",
           );
+
+          // Get labels and broadcast them to the Orchestrator
+          final labels = _backend.getLabels(modelId);
+          if (labels.isNotEmpty) {
+            mainSendPort.send(WorkerLabels(
+              streamId: batch.first.streamId, // Associate labels with the first stream ID in the batch
+              modelPath: modelPath,
+              labels: labels,
+            ));
+          }
         } catch (e) {
           debugPrint("❌ Model load error: $e");
           _failBatch(batch, "Failed to load model: $e");
@@ -191,6 +201,7 @@ class InferenceWorker {
               width: req.width,
               height: req.height,
               streamId: req.streamId,
+              videoId: req.videoId,
             ),
           )
           .toList();

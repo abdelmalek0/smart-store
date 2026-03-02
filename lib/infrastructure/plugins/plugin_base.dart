@@ -80,10 +80,13 @@ abstract class SmartStorePlugin {
       'streamId': _streamId,
       'requestId': requestId,
       'modelPath': modelPath,
-      'frame': TransferableTypedData.fromList([frame.bytes]),
+      'frame': frame.bytes.isEmpty
+          ? null
+          : TransferableTypedData.fromList([frame.bytes]),
       'width': frame.width,
       'height': frame.height,
       'timestamp': frame.decodeTimestamp,
+      'videoId': frame.nativeVideoId,
     });
   }
 

@@ -37,6 +37,7 @@ class InferenceOrchestrator {
     required Uint8List imageBytes,
     required int width,
     required int height,
+    int? videoId,
   }) async {
     // 1. Get or Create Runtime
     InferenceRuntime? runtime = InferenceRegistry.instance.getRuntime(modelPath);
@@ -60,7 +61,14 @@ class InferenceOrchestrator {
     }
 
     // 2. Enqueue Frame
-    runtime.enqueueFrame(streamId, requestId, imageBytes, width, height);
+    runtime.enqueueFrame(
+      streamId,
+      requestId,
+      imageBytes,
+      width,
+      height,
+      videoId: videoId,
+    );
   }
 
   /// Release all resources

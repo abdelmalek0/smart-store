@@ -62,6 +62,10 @@ ONNX_BRIDGE_EXPORT int64_t Video_Open(const char* url);
 // Release video resources
 ONNX_BRIDGE_EXPORT void Video_Release(int64_t video_id);
 
+// Get the native FPS of the video (reads r_frame_rate from the stream).
+// Returns the frame rate (e.g. 25.0, 29.97, 30.0) or 25.0 as fallback.
+ONNX_BRIDGE_EXPORT double Video_GetFPS(int64_t video_id);
+
 // Get the next frame.
 // out_buffer: pointer to pixel data (RGBA)
 // width, height: output dimensions
@@ -82,6 +86,18 @@ ONNX_BRIDGE_EXPORT int Video_GetFrameAndInfer(
     int* out_height,
     float* out_inference_time,
     int64_t* out_timestamp
+);
+
+// Run inference ONLY on the LAST captured frame (Zero-Copy 2.0)
+// This allows the Pipeline to orchestrate inference separately from capture
+// while still keeping the data on the GPU.
+ONNX_BRIDGE_EXPORT int Video_InferenceOnly(
+    int64_t video_id,
+    int64_t session_id,
+    const char* input_name,
+    const char** output_names,
+    int num_outputs,
+    float* out_inference_time
 );
 
 // Preprocess an image (resize, normalize, HWC->CHW)

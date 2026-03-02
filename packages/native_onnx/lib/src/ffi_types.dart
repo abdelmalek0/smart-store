@@ -40,6 +40,7 @@ typedef SessionGetOutputFunc =
 // --- Video Capture C Function Typedefs ---
 typedef VideoOpenFunc = Int64 Function(Pointer<Utf8> url);
 typedef VideoReleaseFunc = Void Function(Int64 id);
+typedef VideoGetFpsFunc = Double Function(Int64 id);
 typedef VideoGetFrameFunc =
     Int32 Function(
       Int64 id,
@@ -61,6 +62,16 @@ typedef VideoGetFrameAndInferFunc =
       Pointer<Int32> outHeight,
       Pointer<Float> outInferenceTime,
       Pointer<Int64> outTimestamp,
+    );
+
+typedef VideoInferenceOnlyFunc =
+    Int32 Function(
+      Int64 videoId,
+      Int64 sessionId,
+      Pointer<Utf8> inputName,
+      Pointer<Pointer<Utf8>> outputNames,
+      Int32 numOutputs,
+      Pointer<Float> outInferenceTime,
     );
 
 // --- Image Preprocessing C Function Typedefs ---
@@ -107,6 +118,7 @@ typedef SessionGetOutput =
 // Video Capture Dart Typedefs
 typedef VideoOpen = int Function(Pointer<Utf8> url);
 typedef VideoRelease = void Function(int id);
+typedef VideoGetFps = double Function(int id);
 typedef VideoGetFrame =
     int Function(
       int id,
@@ -128,6 +140,16 @@ typedef VideoGetFrameAndInfer =
       Pointer<Int32> outHeight,
       Pointer<Float> outInferenceTime,
       Pointer<Int64> outTimestamp,
+    );
+
+typedef VideoInferenceOnly =
+    int Function(
+      int videoId,
+      int sessionId,
+      Pointer<Utf8> inputName,
+      Pointer<Pointer<Utf8>> outputNames,
+      int numOutputs,
+      Pointer<Float> outInferenceTime,
     );
 
 // Image Preprocessing Dart Typedef

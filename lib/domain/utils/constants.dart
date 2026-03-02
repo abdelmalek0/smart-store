@@ -35,6 +35,16 @@ class Constants {
   /// - Smaller values: Lower latency, may stutter if inference fluctuates
   static const int displayQueueMaxSize = 10;
 
+  /// Maximum acceptable display latency in milliseconds.
+  ///
+  /// Processed frames older than this (measured from their generation time)
+  /// are considered stale and discarded by [DisplayQueue].
+  ///
+  /// Rationale: inference at ~8 fps = 125ms/frame. Allowing 500ms means at
+  /// most 4 inference cycles of buffering before we drop — keeps the display
+  /// real-time while absorbing short inference spikes.
+  static const int maxDisplayLatencyMs = 500;
+
   // ============================================================================
   // PERFORMANCE TUNING
   // ============================================================================

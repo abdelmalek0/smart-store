@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:smart_store_linux/domain/entities/inference_result.dart';
 import 'package:smart_store_linux/infrastructure/ai/worker/inference_worker.dart';
 import 'package:smart_store_linux/infrastructure/ai/worker/messages.dart';
+import 'package:smart_store_linux/infrastructure/streaming/stream_orchestrator.dart';
 
 /// Single Runtime Instance for a specific Model
 ///
@@ -74,6 +75,16 @@ class InferenceRuntime {
             completer.completeError(message.error ?? "Unknown Error");
           }
         }
+      } else if (message is WorkerLabels) {
+        // Forward labels to StreamOrchestrator for the associated stream(s)
+        try {
+          _labels = message.labels;
+          for (final sid in _knownStreams) {
+            StreamOrchestrator.instance.updateLabels(sid, message.labels);
+          }
+        } catch (e) {
+          debugPrint("Failed to update labels: $e");
+        }
       } else if (message is WorkerResponse) {
         // Forward to stream
         if (message.error != null) {
@@ -111,17 +122,30 @@ class InferenceRuntime {
     }
   }
 
+  final Set<String> _knownStreams = {};
+  Map<int, String> _labels = {};
+
   /// Enqueue a frame for inference
   void enqueueFrame(
     String streamId,
     int requestId,
     Uint8List bytes,
     int w,
-    int h,
-  ) {
+    int h, {
+    int? videoId,
+  }) {
     if (!_isInitialized || _workerSendPort == null) {
       debugPrint("⚠️ InferenceRuntime not initialized for $modelPath");
       return;
+    }
+
+    if (!_knownStreams.contains(streamId)) {
+      _knownStreams.add(streamId);
+      if (_labels.isNotEmpty) {
+        try {
+          StreamOrchestrator.instance.updateLabels(streamId, _labels);
+        } catch (_) {}
+      }
     }
 
     _workerSendPort!.send(
@@ -132,6 +156,7 @@ class InferenceRuntime {
         imageBytes: bytes,
         width: w,
         height: h,
+        videoId: videoId,
       ),
     );
   }

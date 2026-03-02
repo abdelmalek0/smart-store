@@ -8,8 +8,15 @@
 #include <mutex>
 
 // CUDA-GL interop
+#include <cuda.h>
 #include <cuda_runtime.h>
 #include <cuda_gl_interop.h>
+#include <cudaEGL.h>
+#include <cuda_egl_interop.h>
+
+// EGL
+#include <EGL/egl.h>
+#include <EGL/eglext.h>
 
 namespace texture_manager {
 
@@ -31,6 +38,15 @@ struct TextureInfo {
     cudaGraphicsResource_t pbo_cuda_resource = nullptr;
     bool pbo_registered = false;
     bool use_pbo_path = false;  // Set to true if texture interop fails but PBO works
+    
+    // DMA-BUF EGL sharing (True Zero-copy on Wayland)
+    bool use_dma_buf = false;
+    bool dma_buf_registered = false;
+    int dma_buf_fd = -1;
+    CUmemGenericAllocationHandle dma_alloc_handle = 0;
+    CUdeviceptr dma_device_ptr = 0;
+    size_t dma_alloc_size = 0;
+    EGLImageKHR egl_image = nullptr;
     
     // Frame readiness - prevents Flutter from sampling uninitialized texture
     bool has_valid_frame = false;  // Set to true after first successful frame upload
@@ -62,6 +78,13 @@ struct TextureInfo {
           pbo_cuda_resource(other.pbo_cuda_resource),
           pbo_registered(other.pbo_registered),
           use_pbo_path(other.use_pbo_path),
+          use_dma_buf(other.use_dma_buf),
+          dma_buf_registered(other.dma_buf_registered),
+          dma_buf_fd(other.dma_buf_fd),
+          dma_alloc_handle(other.dma_alloc_handle),
+          dma_device_ptr(other.dma_device_ptr),
+          dma_alloc_size(other.dma_alloc_size),
+          egl_image(other.egl_image),
           has_valid_frame(other.has_valid_frame),
           pending_gpu_frame(std::move(other.pending_gpu_frame)),
           has_pending_gpu_frame(other.has_pending_gpu_frame),
@@ -76,6 +99,10 @@ struct TextureInfo {
         other.cuda_resource = nullptr;
         other.pbo_id = 0;
         other.pbo_cuda_resource = nullptr;
+        other.dma_buf_fd = -1;
+        other.dma_alloc_handle = 0;
+        other.dma_device_ptr = 0;
+        other.egl_image = nullptr;
     }
 
     // Explicit move assignment
@@ -96,6 +123,15 @@ struct TextureInfo {
             pbo_cuda_resource = other.pbo_cuda_resource;
             pbo_registered = other.pbo_registered;
             use_pbo_path = other.use_pbo_path;
+            
+            use_dma_buf = other.use_dma_buf;
+            dma_buf_registered = other.dma_buf_registered;
+            dma_buf_fd = other.dma_buf_fd;
+            dma_alloc_handle = other.dma_alloc_handle;
+            dma_device_ptr = other.dma_device_ptr;
+            dma_alloc_size = other.dma_alloc_size;
+            egl_image = other.egl_image;
+            
             has_valid_frame = other.has_valid_frame;
             pending_gpu_frame = std::move(other.pending_gpu_frame);
             has_pending_gpu_frame = other.has_pending_gpu_frame;
@@ -112,6 +148,12 @@ struct TextureInfo {
             other.pbo_cuda_resource = nullptr;
             other.interop_registered = false;
             other.pbo_registered = false;
+            
+            other.dma_buf_fd = -1;
+            other.dma_alloc_handle = 0;
+            other.dma_device_ptr = 0;
+            other.egl_image = nullptr;
+            other.dma_buf_registered = false;
         }
         return *this;
     }

@@ -33,8 +33,10 @@ class NativeInferenceService {
   // Video
   late VideoOpen _videoOpen;
   late VideoRelease _videoRelease;
+  late VideoGetFps _videoGetFps;
   late VideoGetFrame _videoGetFrame;
   late VideoGetFrameAndInfer _videoGetFrameAndInfer;
+  late VideoInferenceOnly _videoInferenceOnly;
   late PreprocessImage _preprocessImage;
   late SessionGetLabels _getLabels;
   late TextureShowFrame _showFrame;
@@ -106,6 +108,9 @@ class NativeInferenceService {
         _videoRelease = _lib!.lookupFunction<VideoReleaseFunc, VideoRelease>(
           'Video_Release',
         );
+        _videoGetFps = _lib!.lookupFunction<VideoGetFpsFunc, VideoGetFps>(
+          'Video_GetFPS',
+        );
         _videoGetFrame = _lib!.lookupFunction<VideoGetFrameFunc, VideoGetFrame>(
           'Video_GetFrame',
         );
@@ -116,6 +121,10 @@ class NativeInferenceService {
         _videoGetFrameAndInfer = _lib!
             .lookupFunction<VideoGetFrameAndInferFunc, VideoGetFrameAndInfer>(
               'Video_GetFrameAndInfer',
+            );
+        _videoInferenceOnly = _lib!
+            .lookupFunction<VideoInferenceOnlyFunc, VideoInferenceOnly>(
+              'Video_InferenceOnly',
             );
         _getLabels = _lib!
             .lookupFunction<SessionGetLabelsFunc, SessionGetLabels>(
@@ -265,6 +274,14 @@ class NativeInferenceService {
   /// Release a video stream
   void videoRelease(int id) => _videoRelease(id);
 
+  /// Get the native FPS of the video source.
+  /// Returns > 0 for file sources (e.g. 25.0, 29.97).
+  /// Returns 0.0 for live RTSP streams (no pacing needed — stream self-paces).
+  double videoGetFps(int id) {
+    if (!_isInitialized) return 0.0;
+    return _videoGetFps(id);
+  }
+
   /// Get a frame from a video stream
   /// Returns 0 on success, error code on failure
   int videoGetFrame(
@@ -320,6 +337,41 @@ class NativeInferenceService {
         height,
         outInferenceTime,
         outTimestamp,
+      );
+    } finally {
+      calloc.free(inputNamePtr);
+      for (int i = 0; i < outputNames.length; i++) {
+        calloc.free(outNamesPtr[i]);
+      }
+      calloc.free(outNamesPtr);
+    }
+  }
+
+  /// Run inference ONLY on the LAST captured frame (Zero-Copy 2.0)
+  /// Returns 0 on success
+  int videoInferenceOnly(
+    int videoId,
+    int sessionId,
+    String inputName,
+    List<String> outputNames,
+    Pointer<Float> outInferenceTime,
+  ) {
+    if (!_isInitialized) return -1;
+
+    final inputNamePtr = inputName.toNativeUtf8();
+    final outNamesPtr = calloc<Pointer<Utf8>>(outputNames.length);
+    for (int i = 0; i < outputNames.length; i++) {
+      outNamesPtr[i] = outputNames[i].toNativeUtf8();
+    }
+
+    try {
+      return _videoInferenceOnly(
+        videoId,
+        sessionId,
+        inputNamePtr,
+        outNamesPtr,
+        outputNames.length,
+        outInferenceTime,
       );
     } finally {
       calloc.free(inputNamePtr);

@@ -4,10 +4,11 @@
 #include <opencv2/opencv.hpp>
 #include <opencv2/core/cuda.hpp>
 
+struct SessionContext;
 class ImageProcessor {
 public:
     static int Preprocess(uint8_t* in_data, int width, int height, float* out_data);
     
-    // Returns true on success
-    static bool PreprocessGpu(const cv::cuda::GpuMat& rgba_gpu, float** out_cuda_ptr, cv::cuda::GpuMat& temp_buffer);
+    // Optimized GPU-to-GPU preprocessing
+    static bool PreprocessGpu(const cv::cuda::GpuMat& rgba_gpu, float** out_cuda_ptr, SessionContext* ctx);
 };

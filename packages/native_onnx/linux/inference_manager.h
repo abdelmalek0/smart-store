@@ -25,8 +25,12 @@ struct SessionContext {
     // CPU preprocessing buffer (fallback)
     std::vector<float> preprocess_buffer;
     
-    // GPU preprocessing buffer for full GPU inference
-    cv::cuda::GpuMat gpu_preprocess_buffer;  // Stores 1x3x640x640 in CHW format
+    // GPU preprocessing buffers for full GPU inference
+    cv::cuda::GpuMat gpu_preprocess_buffer;  // Final 1x3x640x640 in CHW format
+    cv::cuda::GpuMat gpu_rgb;
+    cv::cuda::GpuMat gpu_resized;
+    cv::cuda::GpuMat gpu_float;
+    std::vector<cv::cuda::GpuMat> gpu_channels; // For planar transpose
     float* cuda_tensor_ptr = nullptr;        // CUDA memory for ONNX tensor
     size_t cuda_tensor_size = 0;
 };

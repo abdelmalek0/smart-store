@@ -14,11 +14,15 @@ class RawFrame {
   /// System timestamp when the frame was captured (epoch ms).
   final int generationTimeMs;
 
+  /// Optional: Native ID for optimized GPU inference
+  final int? nativeVideoId;
+
   RawFrame(
     this.bytes,
     this.width,
     this.height,
     this.decodeTimestamp, {
     this.generationTimeMs = 0,
+    this.nativeVideoId,
   });
 }

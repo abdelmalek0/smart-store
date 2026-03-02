@@ -29,18 +29,6 @@ class PluginOrchestrator {
     }
   }
 
-  /// Inject an already processed frame (e.g. from Linux Native Optimization)
-  void injectProcessedFrame(String streamId, ProcessedFrame frame) {
-    if (!_outputControllers.containsKey(streamId)) {
-      _outputControllers[streamId] =
-          StreamController<ProcessedFrame>.broadcast();
-    }
-    // Forward directly to output stream (Pipeline listens to this)
-    if (!_outputControllers[streamId]!.isClosed) {
-      _outputControllers[streamId]!.add(frame);
-    }
-  }
-
   /// Get the aggregated output stream for a stream ID
   Stream<ProcessedFrame> getOutputStream(String streamId) {
     if (!_outputControllers.containsKey(streamId)) {

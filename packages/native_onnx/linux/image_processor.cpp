@@ -6,6 +6,7 @@
 #ifdef HAVE_OPENCV_CUDAIMGPROC
 #include <opencv2/cudaimgproc.hpp>
 #include <opencv2/cudawarping.hpp>
+#include <opencv2/cudaarithm.hpp>
 #endif
 
 int ImageProcessor::Preprocess(uint8_t* in_data, int width, int height, float* out_data) {
@@ -106,50 +107,54 @@ int ImageProcessor::Preprocess(uint8_t* in_data, int width, int height, float* o
     }
 }
 
-bool ImageProcessor::PreprocessGpu(const cv::cuda::GpuMat& rgba_gpu, float** out_cuda_ptr, 
-                        cv::cuda::GpuMat& temp_buffer) {
+#include "inference_manager.h"
+
+bool ImageProcessor::PreprocessGpu(const cv::cuda::GpuMat& rgba_gpu, float** out_cuda_ptr, SessionContext* ctx) {
     try {
         #ifdef HAVE_OPENCV_CUDAIMGPROC
+        if (!ctx) return false;
+
         // 1. Convert RGBA -> RGB on GPU
-        cv::cuda::GpuMat gpu_rgb;
-        cv::cuda::cvtColor(rgba_gpu, gpu_rgb, cv::COLOR_RGBA2RGB);
+        cv::cuda::cvtColor(rgba_gpu, ctx->gpu_rgb, cv::COLOR_RGBA2RGB);
         
         // 2. Resize to 640x640 on GPU
-        cv::cuda::GpuMat gpu_resized;
-        cv::cuda::resize(gpu_rgb, gpu_resized, cv::Size(640, 640), 0, 0, cv::INTER_LINEAR);
+        cv::cuda::resize(ctx->gpu_rgb, ctx->gpu_resized, cv::Size(640, 640), 0, 0, cv::INTER_LINEAR);
         
         // 3. Convert to float and normalize (1/255) on GPU
-        cv::cuda::GpuMat gpu_float;
-        gpu_resized.convertTo(gpu_float, CV_32FC3, 1.0/255.0);
+        ctx->gpu_resized.convertTo(ctx->gpu_float, CV_32FC3, 1.0/255.0);
         
-        // 4. Download for CHW conversion (CPU - fast for small 640x640 image)
-        cv::Mat cpu_float;
-        gpu_float.download(cpu_float);
+        // 4. CHW Transpose (HWC -> Planar) ON GPU (Zero CPU Hops)
+        if (ctx->gpu_channels.size() != 3) ctx->gpu_channels.resize(3);
+        for (int i = 0; i < 3; ++i) {
+            if (ctx->gpu_channels[i].rows != 640 || ctx->gpu_channels[i].cols != 640) {
+                ctx->gpu_channels[i].create(640, 640, CV_32FC1);
+            }
+        }
+        cv::cuda::split(ctx->gpu_float, ctx->gpu_channels);
         
-        // 5. HWC -> CHW conversion using blobFromImage (optimized)
-        cv::Mat blob;
-        cv::dnn::blobFromImage(cpu_float, blob, 1.0, cv::Size(640, 640), 
-                               cv::Scalar(), false, false, CV_32F);
+        // Ensure destination buffer is allocated at 3 x (640*640)
+        if (ctx->gpu_preprocess_buffer.rows != 3 || ctx->gpu_preprocess_buffer.cols != 640*640) {
+            ctx->gpu_preprocess_buffer.create(3, 640*640, CV_32FC1);
+        }
         
-        // 6. Upload CHW data back to GPU for ONNX CUDA EP
-        temp_buffer.upload(blob.reshape(1, 1));  // 1D row: 1 x (3*640*640)
+        // Copy each channel to its plane in the destination buffer
+        for (int i = 0; i < 3; ++i) {
+            ctx->gpu_channels[i].reshape(1, 1).copyTo(ctx->gpu_preprocess_buffer.row(i));
+        }
         
-        *out_cuda_ptr = reinterpret_cast<float*>(temp_buffer.data);
+        // Resulting memory is guaranteed contiguous in cv::Mat/GpuMat rows
+        *out_cuda_ptr = reinterpret_cast<float*>(ctx->gpu_preprocess_buffer.data);
         
-        // DEBUG: Log first successful GPU preprocess
         static int gpu_prep_count = 0;
         if (gpu_prep_count < 3) {
-            std::cout << "[GPU-PREPROCESS] ✓ Hybrid GPU preprocessing complete (resize/normalize on GPU)" << std::endl;
+            std::cout << "[GPU-PREPROCESS] ✓ Fully GPU-native preprocessing (No CPU hops)" << std::endl;
             gpu_prep_count++;
         }
         
         return true;
-        
         #else
-        std::cerr << "[GPU-PREPROCESS] OpenCV CUDA modules not available" << std::endl;
         return false;
         #endif
-        
     } catch (const std::exception& e) {
         std::cerr << "[GPU-PREPROCESS] Failed: " << e.what() << std::endl;
         return false;

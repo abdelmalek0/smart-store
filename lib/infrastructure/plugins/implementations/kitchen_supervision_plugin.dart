@@ -9,6 +9,7 @@ import 'package:smart_store_linux/application/events/base/event_severity.dart';
 /// Emits an event if 'no-gloves' is detected for 5 seconds consecutively.
 class KitchenSupervisionPlugin extends SmartStorePlugin {
   DateTime? _handDetectionStartTime;
+  DateTime? _lastHandSeenTime;
   int _handClassId = 4; // 'no-gloves' is index 4
   double _confidenceThreshold = 0.5;
   String _modelPath = ''; // Default, can be overridden in config
@@ -77,12 +78,15 @@ class KitchenSupervisionPlugin extends SmartStorePlugin {
     final now = DateTime.now();
 
     if (handDetected) {
+      // Update last seen time and reset 'lost' timer
+      _lastHandSeenTime = now;
+      
       if (_handDetectionStartTime == null) {
         _handDetectionStartTime = now;
         _eventFiredForThisSession = false;
       } else {
         final duration = now.difference(_handDetectionStartTime!);
-        if (duration.inSeconds >= 5 && !_eventFiredForThisSession) {
+        if (duration.inSeconds >= 2 && !_eventFiredForThisSession) {
           debugPrint("Kitchen Violation: Bare hands detected!");
           emitEvent('Kitchen Violation', {
             'msg': 'Bare hands detected for ${duration.inSeconds} seconds!',
@@ -91,16 +95,19 @@ class KitchenSupervisionPlugin extends SmartStorePlugin {
             'timestamp': now.millisecondsSinceEpoch,
             'severity': 'warning',
           }, severity: EventSeverity.warning);
-          _eventFiredForThisSession =
-              true; // Prevent spamming every frame after 5s
+          _eventFiredForThisSession = true;
         }
       }
     } else {
-      // Reset if hand is lost
-      // Optional: Add a small grace period (e.g. 0.5s) to avoid resetting on flickering detections
-      // For now, strict reset.
-      _handDetectionStartTime = null;
-      _eventFiredForThisSession = false;
+      // Grace period: Wait 1.5 seconds before resetting the violation tracking
+      if (_lastHandSeenTime != null) {
+        final lostDuration = now.difference(_lastHandSeenTime!);
+        if (lostDuration.inMilliseconds > 1500) {
+          _handDetectionStartTime = null;
+          _lastHandSeenTime = null;
+          _eventFiredForThisSession = false;
+        }
+      }
     }
 
     // Emit processed frame for display

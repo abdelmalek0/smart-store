@@ -96,6 +96,10 @@ void Video_Release(int64_t video_id) {
     VideoManager::Release(video_id);
 }
 
+double Video_GetFPS(int64_t video_id) {
+    return VideoManager::GetFPS(video_id);
+}
+
 int Video_GetFrame(int64_t video_id, uint8_t** out_buffer, int* width, int* height, int64_t* out_timestamp) {
     return VideoManager::GetFrame(video_id, out_buffer, width, height, out_timestamp);
 }
@@ -145,7 +149,7 @@ int Video_GetFrameAndInfer(
     if (video_ctx && video_ctx->has_gpu_frame && !video_ctx->last_rgba_gpu.empty()) {
         float* cuda_tensor_ptr = nullptr;
         
-        if (ImageProcessor::PreprocessGpu(video_ctx->last_rgba_gpu, &cuda_tensor_ptr, ctx->gpu_preprocess_buffer)) {
+        if (ImageProcessor::PreprocessGpu(video_ctx->last_rgba_gpu, &cuda_tensor_ptr, ctx.get())) {
             try {
                 Ort::MemoryInfo cuda_mem_info("Cuda", OrtDeviceAllocator, 0, OrtMemTypeDefault);
                 int64_t input_dims[] = {1, 3, 640, 640};
@@ -191,9 +195,7 @@ int Video_GetFrameAndInfer(
                 // CRITICAL: Add frame to texture buffer AFTER successful inference
                 if (video_ctx->texture_manager_id > 0 || video_ctx->texture_id > 0) {
                     int tex_id = video_ctx->texture_manager_id > 0 ? video_ctx->texture_manager_id : video_ctx->texture_id;
-                    std::cout << "[INFERENCE-BRIDGE] Adding frame " << timestamp << " to texture buffer (GPU path)" << std::endl;
                     texture_manager::TextureManager::getInstance().setPendingGpuFrame(tex_id, video_ctx->last_rgba_gpu, timestamp);
-                    std::cout << "[INFERENCE-BRIDGE] Frame " << timestamp << " added successfully, returning to Dart" << std::endl;
                 } else {
                     std::cerr << "[INFERENCE-BRIDGE] ERROR: No texture ID configured for frame " << timestamp << std::endl;
                 }
@@ -256,9 +258,7 @@ int Video_GetFrameAndInfer(
         // CRITICAL: Add frame to texture buffer AFTER successful inference
         if (video_ctx->texture_manager_id > 0 || video_ctx->texture_id > 0) {
             int tex_id = video_ctx->texture_manager_id > 0 ? video_ctx->texture_manager_id : video_ctx->texture_id;
-            std::cout << "[INFERENCE-BRIDGE] Adding frame " << timestamp << " to texture buffer (CPU path)" << std::endl;
             texture_manager::TextureManager::getInstance().setPendingGpuFrame(tex_id, video_ctx->last_rgba_gpu, timestamp);
-            std::cout << "[INFERENCE-BRIDGE] Frame " << timestamp << " added successfully, returning to Dart" << std::endl;
         } else {
             std::cerr << "[INFERENCE-BRIDGE] ERROR: No texture ID configured for frame " << timestamp << std::endl;
         }
@@ -269,6 +269,90 @@ int Video_GetFrameAndInfer(
         std::cerr << "[Native] Loop Infer failed: " << e.what() << std::endl;
         return 12;
     }
+}
+
+int Video_InferenceOnly(
+    int64_t video_id, 
+    int64_t session_id, 
+    const char* input_name,
+    const char** output_names, 
+    int num_outputs,
+    float* out_inference_time
+) {
+    auto start_time = std::chrono::high_resolution_clock::now();
+
+    // 1. Get Contexts
+    auto video_ctx = VideoManager::GetContext(video_id);
+    auto ctx = InferenceManager::GetContext(session_id);
+    
+    if (!ctx) return 10; // Session not found
+    if (!video_ctx) return 13; // Video not found
+
+    std::lock_guard<std::mutex> lock(ctx->mutex);
+    
+    // ========================================
+    // GPU INFERENCE PATH (Full Zero-Copy)
+    // ========================================
+    #ifdef HAVE_OPENCV_CUDAIMGPROC
+    if (video_ctx->has_gpu_frame && !video_ctx->last_rgba_gpu.empty()) {
+        float* cuda_tensor_ptr = nullptr;
+        
+        if (ImageProcessor::PreprocessGpu(video_ctx->last_rgba_gpu, &cuda_tensor_ptr, ctx.get())) {
+            try {
+                Ort::MemoryInfo cuda_mem_info("Cuda", OrtDeviceAllocator, 0, OrtMemTypeDefault);
+                int64_t input_dims[] = {1, 3, 640, 640};
+                size_t tensor_size = 1 * 3 * 640 * 640;
+                
+                ctx->input_name_strings.clear();
+                ctx->input_tensors.clear();
+                ctx->input_name_strings.push_back(std::string(input_name));
+                
+                Ort::Value tensor = Ort::Value::CreateTensor<float>(
+                    cuda_mem_info, 
+                    cuda_tensor_ptr, 
+                    tensor_size, 
+                    input_dims, 
+                    4
+                );
+                
+                ctx->input_tensors.push_back(std::move(tensor));
+                
+                std::vector<const char*> input_names_ptrs;
+                input_names_ptrs.push_back(ctx->input_name_strings[0].c_str());
+
+                ctx->output_tensors = ctx->session->Run(
+                    Ort::RunOptions{nullptr}, 
+                    input_names_ptrs.data(), 
+                    ctx->input_tensors.data(), 
+                    ctx->input_tensors.size(), 
+                    output_names, 
+                    num_outputs
+                );
+
+                auto end_time = std::chrono::high_resolution_clock::now();
+                std::chrono::duration<float, std::milli> duration = end_time - start_time;
+                if (out_inference_time) *out_inference_time = duration.count();
+                
+                return 0;
+                
+            } catch (const std::exception& e) {
+                std::cerr << "[GPU-INFER] CUDA tensor inference failed: " << e.what() 
+                          << " - falling back to CPU" << std::endl;
+            }
+        }
+    }
+    #endif
+    
+    // ========================================
+    // CPU INFERENCE PATH (Fallback)
+    // ========================================
+    // Note: This assumes that the last_rgba_gpu frame exists and can be downloaded.
+    // However, in our system, if we are in CPU mode, VideoManager::GetFrame would have 
+    // already populated the CPU buffer.
+    // For simplicity, if GPU path fails, we return error here because the CPU frame 
+    // buffer management is different (it's passed out of GetFrame).
+    
+    return 14; // Inference only currently supported on GPU path
 }
 
 // ==========================================

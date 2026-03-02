@@ -35,26 +35,16 @@ Future<void> _captureLoopAsync(IsolateInitParams params) async {
   // Create platform-specific video capture implementation
   final capture = VideoCapture();
 
-  // Linux: Enable optimized inference path if model provided
-  if (Platform.isLinux &&
-      params.modelPath != null &&
-      capture is LinuxVideoCapture) {
-    await capture.enableOptimizedInference(params.modelPath!);
-
-    // Send labels to parent isolate for UI access
-    final labels = LinuxVideoCapture.modelLabels;
-    if (labels.isNotEmpty) {
-      params.sendPort.send(['labels', labels]);
-      debugPrint("📋 Sent ${labels.length} labels to main isolate");
-    }
-  }
+  // Linux: Registry labels (removed in this path)
 
   VideoCaptureResult? videoStream;
   int lastFrameTime = DateTime.now().millisecondsSinceEpoch;
   int frameCount = 0;
   int lastFrameProcessedTime = DateTime.now().millisecondsSinceEpoch;
 
-  // Frame rate limiting (removed)
+  // Per-frame target interval derived from the video's native FPS.
+  // 0 = live/RTSP stream: the blocking FFI call self-paces; no extra delay needed.
+  int targetFrameMs = 0;
 
   Future<VideoCaptureResult?> openVideo() async {
     try {
@@ -70,6 +60,16 @@ Future<void> _captureLoopAsync(IsolateInitParams params) async {
       } else {
         // Linux: send stream ID only
         params.sendPort.send(result.streamId);
+      }
+
+      // Derive per-frame target delay from native FPS.
+      // 0.0 = live stream → no artificial pacing.
+      if (result.nativeFps > 0) {
+        targetFrameMs = (1000 / result.nativeFps).round();
+        debugPrint('✓ Video FPS: ${result.nativeFps.toStringAsFixed(2)} → target frame interval: ${targetFrameMs}ms');
+      } else {
+        targetFrameMs = 0; // RTSP: self-pacing
+        debugPrint('✓ Video: live/RTSP stream — no frame-rate pacing applied');
       }
 
       debugPrint("✓ Video stream opened (ID: ${result.streamId})");
@@ -116,6 +116,11 @@ Future<void> _captureLoopAsync(IsolateInitParams params) async {
         }
       }
 
+      // Record iteration start time for accurate frame-rate pacing.
+      // Must be captured BEFORE the blocking FFI call so the Dart sleep
+      // correctly accounts for the time spent inside the C++ decoder.
+      final iterStartMs = DateTime.now().millisecondsSinceEpoch;
+
       try {
         if (!isRunning) break;
 
@@ -130,45 +135,16 @@ Future<void> _captureLoopAsync(IsolateInitParams params) async {
           final timeSinceLastFrame = now - lastFrameProcessedTime;
           lastFrameProcessedTime = now;
 
-          // Check if this is an optimized frame with inference results
-          if (frame is LinuxOptimizedFrame) {
-            // Log every 30 frames to track inference rate
-            if (frameCount % 30 == 0) {
-              debugPrint(
-                "📊 CaptureIsolate: Frame #$frameCount (OPTIMIZED with inference) - "
-                "Time since last: ${timeSinceLastFrame}ms, Inference time: ${frame.inferenceTime}ms",
-              );
-            }
-            // Send processed frame message
-            final transferable = TransferableTypedData.fromList([frame.data]);
-            params.sendPort.send([
-              'processed_frame',
-              transferable,
-              frame.width,
-              frame.height,
-              frame.timestamp,
-              frame.detections,
-              frame.inferenceTime,
-              DateTime.now().millisecondsSinceEpoch, // generationTime
-            ]);
-          } else {
-            // Standard frame (no inference)
-            if (frameCount % 30 == 0) {
-              debugPrint(
-                "📊 CaptureIsolate: Frame #$frameCount (STANDARD no inference) - "
-                "Time since last: ${timeSinceLastFrame}ms",
-              );
-            }
-            final transferable = TransferableTypedData.fromList([frame.data]);
-            params.sendPort.send([
-              'frame',
-              transferable,
-              frame.width,
-              frame.height,
-              frame.timestamp,
-              DateTime.now().millisecondsSinceEpoch, // generationTime
-            ]);
-          }
+          // Standard frame (no inference)
+          final transferable = frame.data.isEmpty ? null : TransferableTypedData.fromList([frame.data]);
+          params.sendPort.send([
+            'frame',
+            transferable,
+            frame.width,
+            frame.height,
+            frame.timestamp,
+            DateTime.now().millisecondsSinceEpoch, // generationTime
+          ]);
         } else {
           // No frame available - check watchdog
           final now = DateTime.now().millisecondsSinceEpoch;
@@ -184,9 +160,32 @@ Future<void> _captureLoopAsync(IsolateInitParams params) async {
         await Future.delayed(const Duration(milliseconds: 50));
       }
 
-      // Minimal delay for high frame rate (check running status)
+      // Frame-rate pacing:
+      // - File sources (targetFrameMs > 0): sleep for the remaining time in the
+      //   frame interval so we decode at the video's native FPS, not as fast as
+      //   the GPU can decode.
+      // - RTSP/live (targetFrameMs == 0): tiny yield only; the blocking FFI call
+      //   already self-paces at the stream's live rate.
       if (isRunning) {
-        await Future.delayed(const Duration(milliseconds: 1));
+        if (targetFrameMs > 0) {
+          // Sleep only the time remaining in this frame's interval.
+          // iterStartMs accounts for the FFI decode time so we don't
+          // double-count: C++ no longer sleeps (WAIT branch removed),
+          // so all pacing is done here.
+          final now = DateTime.now().millisecondsSinceEpoch;
+          final elapsed = now - iterStartMs;
+          // Subtract 1ms to compensate for Dart's Future.delayed overshoot.
+          // On Linux the event loop typically delivers ~1-2ms late, which
+          // accumulates to ~5fps loss at 60fps. Waking up 1ms early keeps us
+          // close to the native frame rate without busy-waiting.
+          const int timerCorrectionMs = 1;
+          final remaining = targetFrameMs - elapsed - timerCorrectionMs;
+          if (remaining > 0) {
+            await Future.delayed(Duration(milliseconds: remaining));
+          }
+        } else {
+          await Future.delayed(const Duration(milliseconds: 1));
+        }
       }
     }
   } finally {

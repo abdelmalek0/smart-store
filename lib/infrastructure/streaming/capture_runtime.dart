@@ -24,10 +24,12 @@ class CaptureRuntime {
   // Native IDs
   int _nativeVideoId = 0;
   int? _textureId;
+  int? _textureManagerId;
 
   // Getters
   int get nativeVideoId => _nativeVideoId;
   int? get textureId => _textureId;
+  int? get textureManagerId => _textureManagerId;
 
   // Callbacks
   Function(RawFrame frame)? onFrameReceived;
@@ -48,11 +50,11 @@ class CaptureRuntime {
   final VideoBridge _bridge = VideoBridge();
 
   /// Spawn the capture isolate
-  Future<void> start(String? modelPath) async {
+  Future<void> start() async {
     _captureReceivePort = ReceivePort();
     try {
       debugPrint(
-        'CaptureIsolateController: Spawning capture isolate for $streamId with modelPath=$modelPath',
+        'CaptureIsolateController: Spawning capture isolate for $streamId',
       );
 
       _captureIsolate = await Isolate.spawn(
@@ -61,7 +63,7 @@ class CaptureRuntime {
           _captureReceivePort!.sendPort,
           streamUrl,
           RootIsolateToken.instance!,
-          modelPath: modelPath,
+          modelPath: null, // Force null - no inference in capture loop
         ),
       );
 
@@ -98,7 +100,7 @@ class CaptureRuntime {
 
       if (msgType == 'frame') {
         // Standard Frame with TransferableTypedData
-        final transferable = message[1] as TransferableTypedData;
+        final transferable = message[1] as TransferableTypedData?;
         final width = message[2] as int;
         final height = message[3] as int;
         final timestamp = message[4] as int;
@@ -108,21 +110,15 @@ class CaptureRuntime {
         final generationTime = message[5] as int;
         final lag = now - generationTime;
 
-        debugPrint(
-          "CaptureRuntime: TS=$timestamp Gen=$generationTime Lag=${lag}ms",
-        );
-
         if (lag > 1000) {
           debugPrint(
             "CaptureRuntime: Dropping frame $timestamp (Queue Lag: ${lag}ms)",
           );
 
           // CRITICAL FIX: Flush the frame from Native Buffer!
-          // If we simply drop it here, the native buffer fills up with unconsumed frames.
-          // We must tell Native to "consume" it (showFrame removes it from buffer).
-          if (_textureId != null) {
+          if (_textureManagerId != null) {
             try {
-              _bridge.showFrame(_textureId!, timestamp);
+              _bridge.showFrame(_textureManagerId!, timestamp);
             } catch (e) {
               // Ignore errors during flush
             }
@@ -132,80 +128,26 @@ class CaptureRuntime {
           return;
         }
 
-        final bytes = transferable.materialize().asUint8List();
+        final bytes = transferable?.materialize().asUint8List() ?? Uint8List(0);
         final frame = RawFrame(
           bytes,
           width,
           height,
           timestamp,
           generationTimeMs: generationTime,
+          nativeVideoId: _nativeVideoId, // Pass native ID for downstream inference
         );
         onFrameReceived?.call(frame);
-      } else if (msgType == 'processed_frame') {
-        // Optimized Linux Path (Frame + Inference)
-        final transferable = message[1] as TransferableTypedData;
-        final width = message[2] as int;
-        final height = message[3] as int;
-        final timestamp = message[4] as int;
-
-        // Robust Latency Check using Generation Time
-        final now = DateTime.now().millisecondsSinceEpoch;
-        if (message.length > 7) {
-          final generationTime = message[7] as int;
-          final lag = now - generationTime;
-
-          debugPrint(
-            "CaptureRuntime: Frame Lag: ${lag}ms (Gen: $generationTime, Now: $now)",
-          );
-
-          if (lag > 1000) {
-            debugPrint(
-              "CaptureRuntime: Dropping processed frame $timestamp (Queue Lag: ${lag}ms)",
-            );
-
-            // CRITICAL FIX: Flush Native Buffer
-            if (_textureId != null) {
-              try {
-                NativeInferenceService().showFrame(_textureId!, timestamp);
-              } catch (e) {
-                // Ignore errors during flush to avoid spamming logs
-              }
-            }
-
-            // Do NOT materialize bytes
-            return;
-          }
-        }
-
-        final detections = (message[5] as List<dynamic>?) ?? [];
-        final inferenceTime = (message.length > 6) ? message[6] as double : 0.0;
-        final generationTime = (message.length > 7)
-            ? message[7] as int
-            : 0; // Capture generation time
-
-        final bytes = transferable.materialize().asUint8List();
-
-        final processed = ProcessedFrame(
-          imageBytes: bytes,
-          width: width,
-          height: height,
-          detections: detections,
-          decodeStartMs: timestamp,
-          generationTimeMs: generationTime,
-          preprocessEndMs: now - inferenceTime.toInt(),
-          inferenceEndMs: now,
-          postprocessEndMs: now,
-        );
-        onProcessedFrameReceived?.call(processed);
       } else if (msgType == 'labels') {
         final labelsMap = message[1] as Map<int, String>;
         onLabelsReceived?.call(labelsMap);
       }
     } else if (message is Map && message.containsKey('videoId')) {
       _nativeVideoId = message['videoId'] as int;
-      _textureId = message['textureId'] as int;
+      _textureId = message['textureId'] as int?;
+      _textureManagerId = message['textureManagerId'] as int?;
       debugPrint(
-        "CaptureIsolateController: Video Init. ID=$_nativeVideoId, Texture=$_textureId",
+        "CaptureIsolateController: Video Init. ID=$_nativeVideoId, Texture=$_textureId, Mgr=$_textureManagerId",
       );
       onInitComplete?.call(_nativeVideoId, _textureId);
     } else if (message is int) {

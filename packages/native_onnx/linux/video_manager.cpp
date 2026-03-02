@@ -7,6 +7,7 @@
 #ifdef USE_NPP
 #include <nppi_color_conversion.h>
 #include <npp.h>
+#include <opencv2/cudawarping.hpp>
 #endif
 
 // Global storage for VideoContexts
@@ -41,26 +42,15 @@ int64_t VideoManager::Open(const char* url) {
         std::string url_str(url);
         
         if (url_str.find("rtsp://") == 0) {
-            std::cout << "[NVDEC] RTSP stream detected, configuring for reliability..." << std::endl;
-            
-            // Use TCP instead of UDP to avoid packet loss/distortion
+            // Aggressive low-latency for real-time inference
             av_dict_set(&options, "rtsp_transport", "tcp", 0);
-            
-            // Set buffer size to handle network jitter
-            av_dict_set(&options, "buffer_size", "4096000", 0);  // 4MB buffer
-            
-            // Reduce latency
-            av_dict_set(&options, "max_delay", "500000", 0);  // 0.5 seconds
-            
-            // Allow discarding corrupted frames
-            av_dict_set(&options, "fflags", "discardcorrupt", 0);
-            
-            // Set timeout
-            av_dict_set(&options, "stimeout", "5000000", 0);  // 5 seconds
-            
-            // For low-latency streaming, don't analyze too long
-            av_dict_set(&options, "analyzeduration", "500000", 0);  // 0.5s
-            av_dict_set(&options, "probesize", "500000", 0);  // 500KB
+            av_dict_set(&options, "buffer_size", "102400", 0);  // 100KB buffer (down from 4MB)
+            av_dict_set(&options, "max_delay", "100000", 0);    // 0.1 seconds
+            av_dict_set(&options, "fflags", "nobuffer+discardcorrupt", 0);
+            av_dict_set(&options, "flags", "low_delay", 0);
+            av_dict_set(&options, "stimeout", "5000000", 0);
+            av_dict_set(&options, "analyzeduration", "100000", 0);
+            av_dict_set(&options, "probesize", "100000", 0);
         }
         
         // 3. Open input stream
@@ -257,6 +247,34 @@ void VideoManager::SetTextureManagerId(int64_t video_id, int texture_manager_id)
     }
 }
 
+double VideoManager::GetFPS(int64_t video_id) {
+#ifdef USE_FFMPEG_NVDEC
+    auto ctx = GetContext(video_id);
+    if (!ctx || !ctx->format_ctx || ctx->video_stream_idx < 0) return 0.0;
+
+    AVStream* stream = ctx->format_ctx->streams[ctx->video_stream_idx];
+
+    // r_frame_rate is the "real" base frame rate — set for files (e.g. 25/1, 30000/1001).
+    // For live RTSP streams it is typically 0/0 (undefined), which we return as 0.0
+    // so the Dart side knows NOT to apply any artificial pacing.
+    double fps = av_q2d(stream->r_frame_rate);
+    if (fps > 0.0 && fps <= 120.0) return fps;
+
+    // avg_frame_rate: secondary fallback (may be set even when r_frame_rate is not)
+    fps = av_q2d(stream->avg_frame_rate);
+    if (fps > 0.0 && fps <= 120.0) return fps;
+
+    // 0.0 → caller should not apply pacing (live stream or unknown source)
+    return 0.0;
+#else
+    auto ctx = GetContext(video_id);
+    if (!ctx || !ctx->cap) return 0.0;
+    double fps = ctx->cap->get(cv::CAP_PROP_FPS);
+    if (fps > 0.0 && fps <= 120.0) return fps;
+    return 0.0;
+#endif
+}
+
 int VideoManager::GetFrame(int64_t video_id, uint8_t** out_buffer, int* width, int* height, int64_t* out_timestamp, bool add_to_texture_buffer) {
     std::shared_ptr<VideoContext> ctx;
     
@@ -327,10 +345,24 @@ int VideoManager::GetFrame(int64_t video_id, uint8_t** out_buffer, int* width, i
             auto elapsed_wall_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - ctx->start_time).count();
             auto elapsed_video_ms = timestamp - ctx->start_pts;
             
-            if (elapsed_video_ms < (elapsed_wall_ms - 50)) {
+            // CATCH UP: If frame is too old (> 30ms behind), skip it to stay real-time
+            if (elapsed_video_ms < (elapsed_wall_ms - 30)) { 
                  av_frame_unref(ctx->frame);
+                 
+                 // If drift is extreme (> 2s), reset start time to prevent permanent skip
+                 if (elapsed_wall_ms - elapsed_video_ms > 2000) {
+                     std::cout << "[VideoManager] Extreme drift detected (Catch-up: " << (elapsed_wall_ms - elapsed_video_ms) 
+                               << "ms). Resetting sync clock." << std::endl;
+                     ctx->first_frame_read = false; 
+                 }
+                 
                  continue; 
             }
+
+            // NOTE: No WAIT/sleep here.
+            // Frame-rate pacing for file sources is handled by the Dart capture isolate
+            // using targetFrameMs derived from Video_GetFPS(). Having both C++ and Dart
+            // sleep for the frame interval doubles the delay and causes FPS instability.
         }
         break;
     }
@@ -358,20 +390,27 @@ int VideoManager::GetFrame(int64_t video_id, uint8_t** out_buffer, int* width, i
             cv::cuda::GpuMat rgba_gpu;
             
 #ifdef USE_NPP
-             // ... NPP implementation ...
-             if (ctx->frame->format == AV_PIX_FMT_CUDA) {
+            if (ctx->frame->format == AV_PIX_FMT_CUDA) {
                 int frame_w = ctx->frame->width;
                 int frame_h = ctx->frame->height;
                 
-                cv::cuda::GpuMat rgb_gpu(frame_h, frame_w, CV_8UC3);
-                rgba_gpu.create(frame_h, frame_w, CV_8UC4);
+                // Reuse persistent buffers to avoid allocations
+                if (ctx->rgb_gpu_buf.cols != frame_w || ctx->rgb_gpu_buf.rows != frame_h) {
+                    ctx->rgb_gpu_buf.create(frame_h, frame_w, CV_8UC3);
+                }
+                if (ctx->rgba_gpu_buf.cols != frame_w || ctx->rgba_gpu_buf.rows != frame_h) {
+                    ctx->rgba_gpu_buf.create(frame_h, frame_w, CV_8UC4);
+                }
                 
                 const Npp8u* pSrc[2] = { (const Npp8u*)ctx->frame->data[0], (const Npp8u*)ctx->frame->data[1] };
                 int nSrcStep = ctx->frame->linesize[0];
                 NppiSize oSizeROI = {frame_w, frame_h};
                 
-                if (nppiNV12ToRGB_8u_P2C3R(pSrc, nSrcStep, rgb_gpu.ptr<Npp8u>(), (int)rgb_gpu.step, oSizeROI) == NPP_SUCCESS) {
-                    cv::cuda::cvtColor(rgb_gpu, rgba_gpu, cv::COLOR_RGB2RGBA);
+                // Step 1: NV12 to RGB (GPU-native)
+                if (nppiNV12ToRGB_8u_P2C3R(pSrc, nSrcStep, ctx->rgb_gpu_buf.ptr<Npp8u>(), (int)ctx->rgb_gpu_buf.step, oSizeROI) == NPP_SUCCESS) {
+                    // Step 2: RGB to RGBA (GPU-native)
+                    cv::cuda::cvtColor(ctx->rgb_gpu_buf, ctx->rgba_gpu_buf, cv::COLOR_RGB2RGBA);
+                    rgba_gpu = ctx->rgba_gpu_buf;
                     goto npp_done;
                 }
             }
@@ -418,7 +457,13 @@ int VideoManager::GetFrame(int64_t video_id, uint8_t** out_buffer, int* width, i
                 cv::Mat nv12_cpu(frame_h + uv_height, frame_w, CV_8UC1, ctx->nv12_buffer.data());
                 cv::Mat rgba_cpu;
                 cv::cvtColor(nv12_cpu, rgba_cpu, cv::COLOR_YUV2RGBA_NV12);
-                rgba_gpu.upload(rgba_cpu);
+                
+                // Reuse persistent buffer
+                if (ctx->rgba_gpu_buf.cols != frame_w || ctx->rgba_gpu_buf.rows != frame_h) {
+                    ctx->rgba_gpu_buf.create(frame_h, frame_w, CV_8UC4);
+                }
+                ctx->rgba_gpu_buf.upload(rgba_cpu);
+                rgba_gpu = ctx->rgba_gpu_buf;
             }
 
 #ifdef USE_NPP

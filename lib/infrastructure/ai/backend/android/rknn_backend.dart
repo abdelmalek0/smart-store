@@ -147,4 +147,10 @@ class RknnInferenceBackend extends InferenceBackend {
     _handles.clear();
     _resolutions.clear();
   }
+
+  @override
+  Map<int, String> getLabels(int modelId) {
+    // RKNN plugin doesn't currently expose labels via metadata
+    return {};
+  }
 }

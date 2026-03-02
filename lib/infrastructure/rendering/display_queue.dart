@@ -26,6 +26,11 @@ class DisplayQueue {
   bool _isFrozen = false;
   int _displayCount = 0;
 
+  // Live display FPS tracking (5-second window)
+  int _fpsWindowStart = DateTime.now().millisecondsSinceEpoch;
+  int _fpsWindowFrames = 0;
+  static const int _fpsLogIntervalMs = 5000;
+
   // Getters
   Stream<ProcessedFrame> get frameStream => _frameStreamController.stream;
   bool get isClosed => _frameStreamController.isClosed;
@@ -51,14 +56,26 @@ class DisplayQueue {
 
       try {
         if (_displayQueue.isNotEmpty) {
+          // Drain all but the newest frame to stay real-time.
+          // If inference is slower than capture, old processed frames pile up;
+          // we only ever want to show the most recent one.
+          while (_displayQueue.length > 1) {
+            final stale = _displayQueue.removeFirst();
+            try {
+              final tid = StreamOrchestrator.instance.getTextureManagerId(streamId);
+              if (tid != null) {
+                _bridge.showFrame(tid, stale.decodeStartMs);
+              }
+            } catch (_) {}
+          }
+
           frameToDisplay = _displayQueue.removeFirst();
 
-          // STALENESS CHECK: Drop frame if it's too old for the native buffer
+          // STALENESS CHECK: Drop frame if it's too old (> 500ms = real-time threshold)
           final now = DateTime.now().millisecondsSinceEpoch;
           final lag = now - frameToDisplay.generationTimeMs;
 
-          // If frame is > 1s old and we have generation time, drop it
-          if (frameToDisplay.generationTimeMs > 0 && lag > 1000) {
+          if (frameToDisplay.generationTimeMs > 0 && lag > Constants.maxDisplayLatencyMs) {
             debugPrint(
               "DisplayQueue: Dropping stale frame TS=${frameToDisplay.decodeStartMs} Lag=${lag}ms",
             );
@@ -71,7 +88,7 @@ class DisplayQueue {
             // Ideally we use VideoBridge directly if we knew the Texture ID.
 
             try {
-              final tid = StreamOrchestrator.instance.getTextureId(streamId);
+              final tid = StreamOrchestrator.instance.getTextureManagerId(streamId);
               if (tid != null) {
                 _bridge.showFrame(tid, frameToDisplay.decodeStartMs);
               }
@@ -103,21 +120,25 @@ class DisplayQueue {
         if (frameToDisplay != null && !_frameStreamController.isClosed) {
           _frameStreamController.add(frameToDisplay);
           _displayCount++;
+          _fpsWindowFrames++;
 
-          if (_displayCount % 60 == 0) {
-            debugPrint(
-              "DisplayQueue: Emitting frame #$_displayCount. TS: ${frameToDisplay.decodeStartMs} Q: ${_displayQueue.length}",
-            );
+          final now = DateTime.now().millisecondsSinceEpoch;
+          final elapsed = now - _fpsWindowStart;
+          if (elapsed >= _fpsLogIntervalMs) {
+            final displayFps = (_fpsWindowFrames / (elapsed / 1000.0)).toStringAsFixed(1);
+            debugPrint('[Display] $streamId | live: $displayFps fps | total emitted: $_displayCount');
+            _fpsWindowFrames = 0;
+            _fpsWindowStart  = now;
           }
         }
       } catch (e) {
         debugPrint("DisplayQueue: Error in display loop: $e");
       }
 
-      // Adaptive timing
+      // Vsync-aligned timing (~60fps cap).
+      // Do not spin faster than the display can render — 1ms was burning CPU.
       if (frameToDisplay != null) {
-        // Yield to allow UI updates and other isolates to run
-        await Future.delayed(const Duration(milliseconds: 1));
+        await Future.delayed(const Duration(milliseconds: 16));
       } else {
         await Future.delayed(const Duration(milliseconds: 8));
       }

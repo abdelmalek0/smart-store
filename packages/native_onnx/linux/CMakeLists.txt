@@ -49,16 +49,17 @@ target_link_directories(${PLUGIN_NAME} PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/libs"
 target_link_libraries(${PLUGIN_NAME} PRIVATE flutter)
 target_link_libraries(${PLUGIN_NAME} PRIVATE PkgConfig::GTK)
 
-# Add OpenGL for texture rendering
+# Add OpenGL and EGL for texture rendering and Zero-Copy
 set(OpenGL_GL_PREFERENCE GLVND)  # Use modern GLVND instead of legacy
 find_package(OpenGL REQUIRED)
 target_link_libraries(${PLUGIN_NAME} PRIVATE OpenGL::GL)
 target_link_libraries(${PLUGIN_NAME} PRIVATE OpenGL::GLX)
+target_link_libraries(${PLUGIN_NAME} PRIVATE OpenGL::EGL)
 
 # Use custom OpenCV with CUDA support
 set(OpenCV_DIR /opt/opencv-cuda/lib/cmake/opencv4)
 find_package(OpenCV REQUIRED COMPONENTS
-  core imgproc videoio dnn cudaimgproc cudawarping
+  core imgproc videoio dnn cudaimgproc cudawarping cudaarithm
 )
 
 target_include_directories(${PLUGIN_NAME} PRIVATE ${OpenCV_INCLUDE_DIRS})

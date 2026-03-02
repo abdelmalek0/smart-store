@@ -11,6 +11,7 @@ class NativeOrtRunOptions {
 /// ONNX Runtime session
 class NativeOrtSession {
   final int _id;
+  int get sessionId => _id;
   final NativeInferenceService _service = NativeInferenceService();
   bool _released = false;
 

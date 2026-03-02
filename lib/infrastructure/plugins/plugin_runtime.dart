@@ -45,24 +45,26 @@ void pluginWorkerEntry(Map<String, dynamic> args) {
         plugin.init(sendPort, streamId, config);
       } else if (message['type'] == 'frame') {
         // Frame received
-        final transferable = message['frame'] as TransferableTypedData;
+        final transferable = message['frame'] as TransferableTypedData?;
         final width = message['width'] as int;
         final height = message['height'] as int;
         final timestamp = message['timestamp'] as int;
-        final bytes = transferable.materialize().asUint8List();
+        final bytes = transferable?.materialize().asUint8List() ?? Uint8List(0);
+        final nativeVideoId = message['nativeVideoId'] as int?;
 
-        final frame = RawFrame(bytes, width, height, timestamp);
+        final frame = RawFrame(bytes, width, height, timestamp, nativeVideoId: nativeVideoId);
         plugin.processFrame(frame);
       } else if (message['type'] == 'frame_with_detections') {
         // Optimized path: Frame + Detections
-        final transferable = message['frame'] as TransferableTypedData;
+        final transferable = message['frame'] as TransferableTypedData?;
         final width = message['width'] as int;
         final height = message['height'] as int;
         final timestamp = message['timestamp'] as int;
         final detections = message['detections'] as List<dynamic>;
-        final bytes = transferable.materialize().asUint8List();
+        final bytes = transferable?.materialize().asUint8List() ?? Uint8List(0);
+        final nativeVideoId = message['nativeVideoId'] as int?;
 
-        final frame = RawFrame(bytes, width, height, timestamp);
+        final frame = RawFrame(bytes, width, height, timestamp, nativeVideoId: nativeVideoId);
         plugin.processDirectDetections(frame, detections);
       } else if (message['type'] == 'inference_result') {
         // stdout.writeln("PluginIsolate: Inference Result Received");
@@ -161,14 +163,15 @@ class PluginRuntime {
     _isProcessing = true;
     _droppedFrames = 0;
 
-    // Send frame to plugin isolate
+    // Send frame to plugin isolate (Optimization: Skip TransferableTypedData if empty)
     _isolateSendPort!.send({
       'type': 'frame',
-      'frame': TransferableTypedData.fromList([frame.bytes]),
+      'frame': frame.bytes.isEmpty ? null : TransferableTypedData.fromList([frame.bytes]),
       'width': frame.width,
       'height': frame.height,
       'timestamp': frame.decodeTimestamp,
-      'generationTimeMs': frame.generationTimeMs, // Propagate generation time
+      'generationTimeMs': frame.generationTimeMs, 
+      'nativeVideoId': frame.nativeVideoId,
     });
   }
 
@@ -178,11 +181,12 @@ class PluginRuntime {
     // Send frame + detections to plugin isolate
     _isolateSendPort!.send({
       'type': 'frame_with_detections',
-      'frame': TransferableTypedData.fromList([frame.bytes]),
+      'frame': frame.bytes.isEmpty ? null : TransferableTypedData.fromList([frame.bytes]),
       'width': frame.width,
       'height': frame.height,
       'timestamp': frame.decodeTimestamp,
       'detections': detections,
+      'nativeVideoId': frame.nativeVideoId,
     });
   }
 
@@ -193,10 +197,11 @@ class PluginRuntime {
       // stdout.writeln("PluginManager: Received request_inference");
       final requestId = message['requestId'] as int;
       final modelPath = message['modelPath'] as String;
-      final transferable = message['frame'] as TransferableTypedData;
+      final transferable = message['frame'] as TransferableTypedData?;
       final width = message['width'] as int;
       final height = message['height'] as int;
-      final bytes = transferable.materialize().asUint8List();
+      final videoId = message['videoId'] as int?;
+      final bytes = transferable?.materialize().asUint8List() ?? Uint8List(0);
 
       // Call Model Manager (Active Gateway)
       InferenceOrchestrator.instance.requestInference(
@@ -206,6 +211,7 @@ class PluginRuntime {
         imageBytes: bytes,
         width: width,
         height: height,
+        videoId: videoId,
       );
     } else if (type == 'emit_display_frame') {
       // stdout.writeln("PluginManager: Received emit_display_frame");

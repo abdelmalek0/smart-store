@@ -18,7 +18,11 @@ class VideoCaptureResult {
   /// Flutter texture ID (Android only - for native texture rendering)
   final int? textureId;
 
-  VideoCaptureResult(this.streamId, {this.textureId});
+  /// Native FPS of the source (file sources only).
+  /// 0.0 for live RTSP streams — no pacing should be applied.
+  final double nativeFps;
+
+  VideoCaptureResult(this.streamId, {this.textureId, this.nativeFps = 0.0});
 }
 
 /// A single decoded video frame

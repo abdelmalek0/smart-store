@@ -25,7 +25,6 @@ class Pipeline {
   // Subscriptions
   StreamSubscription<RawFrame>? _frameSubscription;
   StreamSubscription<ProcessedFrame>? _pluginOutputSubscription;
-  StreamSubscription<ProcessedFrame>? _optimizedFrameSubscription;
   StreamSubscription<Map<int, String>>? _labelSubscription;
 
   // State
@@ -74,16 +73,6 @@ class Pipeline {
         debugPrint('Error: No frame stream available for $streamId');
       }
 
-      // 2.1 Subscribe to Optimized Frame Stream (Linux Native Path)
-      final optimizedStream = _streamManager.getProcessedFrameStream(streamId);
-      if (optimizedStream != null) {
-        _optimizedFrameSubscription = optimizedStream.listen((frame) {
-          if (!isFrozen) {
-            _pluginManager.injectProcessedFrame(streamId, frame);
-          }
-        });
-      }
-
       // 2.5 Subscribe to Label Stream (Dynamic Labels from C++)
       final labelStream = _streamManager.getLabelStream(streamId);
       final currentLabels = _streamManager.getCurrentLabels(streamId);
@@ -130,6 +119,11 @@ class Pipeline {
             .listen((processedFrame) {
               if (!isFrozen) {
                 _renderingManager.enqueueFrame(streamId, processedFrame);
+                // Release the gate slot so the next frame can flow through.
+                _streamManager.releaseSlot(streamId);
+              } else {
+                // Even when frozen, release the slot to avoid deadlock.
+                _streamManager.releaseSlot(streamId);
               }
             });
       }
@@ -153,6 +147,7 @@ class Pipeline {
           !_pluginOutputSubscription!.isPaused) {
         // Route to Active Plugins
         _pluginManager.routeFrame(streamId, frame);
+        // Note: releaseSlot is called when plugin emits its output (above).
       } else {
         // No Plugin Active → Pass directly to RenderingManager
         final now = DateTime.now().millisecondsSinceEpoch;
@@ -167,7 +162,12 @@ class Pipeline {
           postprocessEndMs: now,
         );
         _renderingManager.enqueueFrame(streamId, processed);
+        // Release the gate slot immediately (no async inference in this path).
+        _streamManager.releaseSlot(streamId);
       }
+    } else {
+      // Frozen: release slot so we don't deadlock the gate.
+      _streamManager.releaseSlot(streamId);
     }
   }
 
@@ -195,7 +195,6 @@ class Pipeline {
     await _frameSubscription?.cancel();
     await _labelSubscription?.cancel();
     await _pluginOutputSubscription?.cancel();
-    await _optimizedFrameSubscription?.cancel();
 
     await _pluginManager.deactivateAll(streamId);
 
