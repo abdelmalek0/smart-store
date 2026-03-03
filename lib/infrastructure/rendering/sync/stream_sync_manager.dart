@@ -9,23 +9,9 @@ abstract class StreamSyncManager {
   int? _initialTimestamp;
 
   /// Corrects the incoming timestamp to match the native buffer's time base.
+  /// The pipeline preserves native timestamps, so no offset is applied.
   int correctTimestamp(int timestamp) {
-    if (_initialTimestamp == null) {
-      _initialTimestamp = timestamp;
-      // _initialSystemTime = DateTime.now().millisecondsSinceEpoch;
-      // If the incoming timestamp is small (e.g. 0-based), but native is large (system time),
-      // we might need to query native for its current time base or just rely on the first frame
-      // to "snap" to.
-      // However, if we receive 15000 and native has 52000, we need to add the diff.
-      // But we don't know the native time yet until we try to show a frame and fail, or we query it.
-
-      // Better approach: The timestamp we receive here *should* be the one coming from Native.
-      // If Dart's Pipeline is preserving the Native timestamp, then it should match.
-      // If DisplayQueue is generating its own, that's the bug.
-
-      // Let's assume for now we just pass it through, but if we need offset, we add it here.
-      return timestamp;
-    }
+    _initialTimestamp ??= timestamp;
     return timestamp;
   }
 
@@ -40,8 +26,6 @@ abstract class StreamSyncManager {
     } else if (Platform.isAndroid) {
       return AndroidStreamSyncManager(streamId);
     }
-    // Default/Fallback (could be CPU-only implementation, or reuse Linux/Android logic if appropriate)
-    // For now, default to Linux as a "desktop" baseline or throw if unsupported
     return LinuxStreamSyncManager(streamId);
   }
 

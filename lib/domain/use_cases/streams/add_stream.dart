@@ -1,11 +1,9 @@
-import 'package:smart_store_linux/application/config/config_service.dart';
+import 'package:smart_store_linux/domain/repositories/i_config_repository.dart';
 import 'package:smart_store_linux/domain/entities/config/stream_config.dart';
 
 /// Adds a new stream to the configuration.
 class AddStream {
-  final ConfigService _configService;
-
-  AddStream(this._configService);
-
-  Future<void> call(StreamConfig stream) => _configService.addStream(stream);
+  final IConfigRepository _repo;
+  AddStream(this._repo);
+  Future<void> call(StreamConfig stream) => _repo.addStream(stream);
 }

@@ -15,12 +15,7 @@ class LinuxStreamSyncManager extends StreamSyncManager {
   @override
   int? get textureId => _textureId;
 
-  // Linux supports texture managing, Android doesn't need this exposed usually,
-  // but we keep it internal or expose if strictly needed.
-  // The base class doesn't strictly need to expose this getter if only used internally
-  // by logic here, but StreamSyncManager definition might need it if DetachedStreamPlayer used it.
-  // DetachedStreamPlayer only used .textureId.
-  // We'll keep _textureManagerId internal here.
+
 
   @override
   Future<void> initialize(int width, int height) async {
@@ -43,8 +38,7 @@ class LinuxStreamSyncManager extends StreamSyncManager {
 
   @override
   bool updateTextureFromProcessor(int? textureId) {
-    // No-op for Linux usually, as we create texture explicitly.
-    // Unless we change architecture to have processor create it.
+    // On Linux, the texture is created explicitly during initialization.
     return false;
   }
 
@@ -74,11 +68,8 @@ class LinuxStreamSyncManager extends StreamSyncManager {
     required Future<bool> Function(int) onShowFrame,
   }) async {
     if (_textureManagerId != null && _textureId != null) {
-      // Direct call to NativeInferenceService using the correct Texture Manager ID.
-      // We ignore the provided [onShowFrame] callback because it likely carries
-      // the Native Video ID (from StreamManager) instead of the Texture Manager ID.
-      // Using [onShowFrame] would cause an ID mismatch (e.g. VideoID 1 vs TextureID 0).
-
+      // Use textureManagerId directly; the onShowFrame callback carries the
+      // native VideoID which would cause an ID mismatch.
       final success = NativeInferenceService().showFrame(
         _textureManagerId!,
         timestamp,
@@ -95,7 +86,7 @@ class LinuxStreamSyncManager extends StreamSyncManager {
       LinuxTextureService().updateTexture(_textureId!);
       return true;
     }
-    // If not initialized, assume success to keep pipeline moving (limitless mode)
+    // Not yet initialized — let the pipeline continue.
     return true;
   }
 

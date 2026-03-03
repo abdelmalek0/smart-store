@@ -28,3 +28,19 @@ class PlaybackFirstAutoSelected extends PlaybackEvent {
 class PlaybackSidebarToggled extends PlaybackEvent {
   const PlaybackSidebarToggled();
 }
+
+/// Fired after the engine finishes starting all pipelines.
+class PlaybackEngineStarted extends PlaybackEvent {
+  /// IDs of streams that now have an active pipeline.
+  final Set<String> activePipelineIds;
+
+  const PlaybackEngineStarted(this.activePipelineIds);
+
+  @override
+  List<Object?> get props => [activePipelineIds];
+}
+
+/// Fired after the engine stops / clears all pipelines.
+class PlaybackEngineCleared extends PlaybackEvent {
+  const PlaybackEngineCleared();
+}

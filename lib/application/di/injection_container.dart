@@ -1,7 +1,7 @@
 import 'package:get_it/get_it.dart';
-import 'package:smart_store_linux/application/config/config_service.dart';
 import 'package:smart_store_linux/application/events/event_bus_impl.dart';
 import 'package:smart_store_linux/application/services/app_service.dart';
+import 'package:smart_store_linux/domain/repositories/i_config_repository.dart';
 
 // Use Cases — Streams
 import 'package:smart_store_linux/domain/use_cases/streams/get_streams.dart';
@@ -17,9 +17,6 @@ import 'package:smart_store_linux/domain/use_cases/models/update_model.dart';
 // Use Cases — Plugins
 import 'package:smart_store_linux/domain/use_cases/plugins/get_plugins.dart';
 import 'package:smart_store_linux/domain/use_cases/plugins/update_plugin.dart';
-
-// Use Cases — Engine
-import 'package:smart_store_linux/domain/use_cases/engine/toggle_engine.dart';
 
 // Use Cases — Configuration
 import 'package:smart_store_linux/domain/use_cases/configuration/set_active_plugin.dart';
@@ -38,55 +35,50 @@ final sl = GetIt.instance;
 
 /// Registers all dependencies into the [GetIt] service locator.
 ///
-/// Call this once at application startup before [runApp].
-void configureDependencies() {
+/// [repo] is the fully-initialised [IConfigRepository] (config already loaded).
+void configureDependencies(IConfigRepository repo) {
   // ─────────────────────────────────────────────────────────────────────────
-  // Core Services (singletons kept by AppService internals, exposed via sl)
+  // Core (singletons)
   // ─────────────────────────────────────────────────────────────────────────
+  sl.registerLazySingleton<IConfigRepository>(() => repo);
   sl.registerLazySingleton<AppService>(() => AppService.instance);
-  sl.registerLazySingleton<ConfigService>(() => ConfigService.instance);
   sl.registerLazySingleton<SystemService>(() => AppService.instance.system);
   sl.registerLazySingleton<EventBusImpl>(() => EventBusImpl.instance);
 
   // ─────────────────────────────────────────────────────────────────────────
   // Use Cases — Streams
   // ─────────────────────────────────────────────────────────────────────────
-  sl.registerLazySingleton(() => GetStreams(sl<ConfigService>()));
-  sl.registerLazySingleton(() => AddStream(sl<ConfigService>()));
-  sl.registerLazySingleton(() => RemoveStream(sl<ConfigService>()));
+  sl.registerLazySingleton(() => GetStreams(repo));
+  sl.registerLazySingleton(() => AddStream(repo));
+  sl.registerLazySingleton(() => RemoveStream(repo));
 
   // ─────────────────────────────────────────────────────────────────────────
   // Use Cases — Models
   // ─────────────────────────────────────────────────────────────────────────
-  sl.registerLazySingleton(() => GetModels(sl<ConfigService>()));
-  sl.registerLazySingleton(() => AddModel(sl<ConfigService>()));
-  sl.registerLazySingleton(() => RemoveModel(sl<ConfigService>()));
-  sl.registerLazySingleton(() => UpdateModel(sl<ConfigService>()));
+  sl.registerLazySingleton(() => GetModels(repo));
+  sl.registerLazySingleton(() => AddModel(repo));
+  sl.registerLazySingleton(() => RemoveModel(repo));
+  sl.registerLazySingleton(() => UpdateModel(repo));
 
   // ─────────────────────────────────────────────────────────────────────────
   // Use Cases — Plugins
   // ─────────────────────────────────────────────────────────────────────────
-  sl.registerLazySingleton(() => GetPlugins(sl<ConfigService>()));
-  sl.registerLazySingleton(() => UpdatePlugin(sl<ConfigService>()));
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // Use Cases — Engine
-  // ─────────────────────────────────────────────────────────────────────────
-  sl.registerLazySingleton(() => ToggleEngine(sl<AppService>()));
+  sl.registerLazySingleton(() => const GetPlugins());
+  sl.registerLazySingleton(() => UpdatePlugin(repo));
 
   // ─────────────────────────────────────────────────────────────────────────
   // Use Cases — Configuration
   // ─────────────────────────────────────────────────────────────────────────
-  sl.registerLazySingleton(() => SetActivePlugin(sl<ConfigService>()));
+  sl.registerLazySingleton(() => SetActivePlugin(repo));
 
   // ─────────────────────────────────────────────────────────────────────────
-  // BLoCs  (factory: a fresh instance is created for each screen)
+  // BLoCs (factory: fresh instance per screen)
   // ─────────────────────────────────────────────────────────────────────────
   sl.registerFactory<DashboardBloc>(
     () => DashboardBloc(
-      toggleEngine: sl<ToggleEngine>(),
       appService: sl<AppService>(),
       systemService: sl<SystemService>(),
+      repo: repo,
     ),
   );
 
@@ -94,7 +86,7 @@ void configureDependencies() {
     () => StreamsBloc(
       addStream: sl<AddStream>(),
       removeStream: sl<RemoveStream>(),
-      configService: sl<ConfigService>(),
+      repo: repo,
     ),
   );
 
@@ -103,26 +95,24 @@ void configureDependencies() {
       addModel: sl<AddModel>(),
       removeModel: sl<RemoveModel>(),
       updateModel: sl<UpdateModel>(),
-      configService: sl<ConfigService>(),
+      repo: repo,
     ),
   );
 
   sl.registerFactory<PluginsBloc>(
     () => PluginsBloc(
       updatePlugin: sl<UpdatePlugin>(),
-      configService: sl<ConfigService>(),
+      repo: repo,
     ),
   );
 
   sl.registerFactory<ConfigurationBloc>(
     () => ConfigurationBloc(
       setActivePlugin: sl<SetActivePlugin>(),
-      configService: sl<ConfigService>(),
+      repo: repo,
     ),
   );
 
-  // EventsLogBloc is registered as a singleton-factory so all consumers
-  // share the same event history for the lifetime of the app.
   sl.registerLazySingleton<EventsLogBloc>(
     () => EventsLogBloc(eventService: sl<EventBusImpl>()),
   );

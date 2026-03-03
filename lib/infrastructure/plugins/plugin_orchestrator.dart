@@ -2,7 +2,7 @@ import 'package:smart_store_linux/domain/entities/raw_frame.dart';
 import 'dart:async';
 import 'dart:developer';
 import 'package:smart_store_linux/domain/entities/processed_frame.dart';
-import 'package:smart_store_linux/application/config/config_service.dart';
+import 'package:smart_store_linux/domain/repositories/i_config_repository.dart';
 import 'package:smart_store_linux/infrastructure/plugins/plugin_runtime.dart';
 import 'package:smart_store_linux/infrastructure/plugins/plugin_registry.dart';
 
@@ -39,9 +39,13 @@ class PluginOrchestrator {
   }
 
   /// Activate a plugin for a stream using configuration
-  Future<void> activatePlugin(String streamId, String pluginId) async {
-    // 1. Get Config from ConfigService
-    final pluginConfig = ConfigService.instance.getPlugin(pluginId);
+  Future<void> activatePlugin(
+    String streamId,
+    String pluginId, {
+    required IConfigRepository repo,
+  }) async {
+    // 1. Get Config from repository
+    final pluginConfig = repo.getPlugin(pluginId);
     if (pluginConfig == null || !pluginConfig.enabled) {
       log('PluginManager: Plugin $pluginId not found or disabled');
       return;
@@ -57,9 +61,7 @@ class PluginOrchestrator {
 
     // Resolve model path if assigned
     if (pluginConfig.assignedModelId != null) {
-      final model = ConfigService.instance.getModel(
-        pluginConfig.assignedModelId!,
-      );
+      final model = repo.getModel(pluginConfig.assignedModelId!);
       if (model != null) {
         configMap['modelPath'] = model.path;
       }
@@ -68,7 +70,6 @@ class PluginOrchestrator {
     await runtime.init(configMap);
 
     // 3.5 Setup Output Routing
-    // Ensure output controller exists
     if (!_outputControllers.containsKey(streamId)) {
       _outputControllers[streamId] =
           StreamController<ProcessedFrame>.broadcast();

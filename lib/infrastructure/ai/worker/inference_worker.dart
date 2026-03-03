@@ -254,8 +254,7 @@ class InferenceWorker {
           } else if (Platform.isAndroid &&
               result.outputs.isNotEmpty &&
               result.outputs[0] is List<int>) {
-            // RKNN specialized post-processing (Legacy / Fallback)
-            // We need to cast back to expected types
+            // RKNN returns raw int buffers; cast outputs before post-processing.
             final outputs = result.outputs.map((e) => e.cast<int>()).toList();
             final attrs = result.metadata['attrs'] as List<dynamic>? ?? [];
             if (attrs.isNotEmpty) {
@@ -307,13 +306,6 @@ class InferenceWorker {
 
       postprocessStopwatch.stop();
       totalStopwatch.stop();
-
-      // debugPrint(
-      //   "⏱️ Batch[${batch.length}] timing: "
-      //   "Inference=${inferenceMs}ms | "
-      //   "Postprocess=${postprocessStopwatch.elapsedMilliseconds}ms | "
-      //   "Total=${totalStopwatch.elapsedMilliseconds}ms",
-      // );
     } catch (e, st) {
       debugPrint("Worker Batch Error: $e\n$st");
       _failBatch(batch, e.toString());
@@ -497,7 +489,4 @@ class InferenceWorker {
     }).toList();
   }
 
-  // Note: _postProcessYolo() and _performNMS() have been removed.
-  // These methods are now provided by the shared YoloProcessor utility class.
-  // See lib/ai/post_processing/yolo_processor.dart for the implementation.
 }

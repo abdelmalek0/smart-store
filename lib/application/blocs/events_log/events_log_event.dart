@@ -25,11 +25,3 @@ class EventsLogCleared extends EventsLogEvent {
   const EventsLogCleared();
 }
 
-class EventsLogMockAdded extends EventsLogEvent {
-  final Map<String, dynamic> eventData;
-
-  const EventsLogMockAdded(this.eventData);
-
-  @override
-  List<Object?> get props => [eventData];
-}

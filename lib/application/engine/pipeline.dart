@@ -4,23 +4,23 @@ import 'package:flutter/foundation.dart';
 import 'package:smart_store_linux/domain/entities/raw_frame.dart';
 import 'package:smart_store_linux/domain/entities/processed_frame.dart';
 import 'package:smart_store_linux/infrastructure/rendering/rendering_orchestrator.dart';
-import 'package:smart_store_linux/application/config/config_service.dart';
+import 'package:smart_store_linux/domain/repositories/i_config_repository.dart';
 import 'package:smart_store_linux/infrastructure/plugins/plugin_orchestrator.dart';
 import 'package:smart_store_linux/infrastructure/streaming/stream_orchestrator.dart';
 import 'package:smart_store_linux/application/engine/pipeline_registry.dart';
 
 /// Headless stream pipeline that orchestrates Plugin Processing and Display.
 ///
-/// All manager dependencies are injected by [PipelineManager] at construction
+/// All manager dependencies are injected by [EngineOrchestrator] at construction
 /// time. Pipeline never reaches for global singletons directly.
 class Pipeline {
   final String streamId;
 
-  // Injected dependencies (set by PipelineManager)
+  // Injected dependencies
   final StreamOrchestrator _streamManager;
   final PluginOrchestrator _pluginManager;
   final RenderingOrchestrator _renderingManager;
-  final ConfigService _config;
+  final IConfigRepository _repo;
 
   // Subscriptions
   StreamSubscription<RawFrame>? _frameSubscription;
@@ -51,11 +51,11 @@ class Pipeline {
     required StreamOrchestrator streamManager,
     required PluginOrchestrator pluginManager,
     required RenderingOrchestrator renderingManager,
-    required ConfigService config,
+    required IConfigRepository repo,
   }) : _streamManager = streamManager,
        _pluginManager = pluginManager,
        _renderingManager = renderingManager,
-       _config = config;
+       _repo = repo;
 
   /// Initialize the pipeline
   Future<void> initialize() async {
@@ -92,14 +92,14 @@ class Pipeline {
       }
 
       // 3. Activate Plugins & Load Labels
-      final activePluginId = _config.getStream(streamId)?.activePluginId;
+      final activePluginId = _repo.getStream(streamId)?.activePluginId;
       if (activePluginId != null) {
-        await _pluginManager.activatePlugin(streamId, activePluginId);
+        await _pluginManager.activatePlugin(streamId, activePluginId, repo: _repo);
 
         // 4. Load Labels from ModelConfig (Static)
-        final pluginConfig = _config.getPlugin(activePluginId);
+        final pluginConfig = _repo.getPlugin(activePluginId);
         if (pluginConfig?.assignedModelId != null) {
-          final modelConfig = _config.getModel(pluginConfig!.assignedModelId!);
+          final modelConfig = _repo.getModel(pluginConfig!.assignedModelId!);
           if (modelConfig != null && modelConfig.labels.isNotEmpty) {
             _modelLabels = modelConfig.labels;
             debugPrint(
@@ -119,16 +119,14 @@ class Pipeline {
             .listen((processedFrame) {
               if (!isFrozen) {
                 _renderingManager.enqueueFrame(streamId, processedFrame);
-                // Release the gate slot so the next frame can flow through.
                 _streamManager.releaseSlot(streamId);
               } else {
-                // Even when frozen, release the slot to avoid deadlock.
                 _streamManager.releaseSlot(streamId);
               }
             });
       }
 
-      // Register self in PipelineRegistry (Data Store)
+      // Register self in PipelineRegistry
       PipelineRegistry.instance.register(this);
     } catch (e) {
       debugPrint('Error initializing pipeline for $streamId: $e');
@@ -145,11 +143,8 @@ class Pipeline {
     if (!isFrozen) {
       if (_pluginOutputSubscription != null &&
           !_pluginOutputSubscription!.isPaused) {
-        // Route to Active Plugins
         _pluginManager.routeFrame(streamId, frame);
-        // Note: releaseSlot is called when plugin emits its output (above).
       } else {
-        // No Plugin Active → Pass directly to RenderingManager
         final now = DateTime.now().millisecondsSinceEpoch;
         final processed = ProcessedFrame(
           imageBytes: frame.bytes,
@@ -162,11 +157,9 @@ class Pipeline {
           postprocessEndMs: now,
         );
         _renderingManager.enqueueFrame(streamId, processed);
-        // Release the gate slot immediately (no async inference in this path).
         _streamManager.releaseSlot(streamId);
       }
     } else {
-      // Frozen: release slot so we don't deadlock the gate.
       _streamManager.releaseSlot(streamId);
     }
   }
@@ -181,7 +174,6 @@ class Pipeline {
     _renderingManager.unfreeze(streamId);
   }
 
-  /// Show Frame: Proxy to RenderingManager
   Future<bool> showFrame(int timestamp) async {
     final nativeId = _streamManager.getNativeVideoId(streamId);
     return await _renderingManager.showFrame(nativeId, timestamp);

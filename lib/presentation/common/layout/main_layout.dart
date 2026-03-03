@@ -1,14 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:smart_store_linux/presentation/common/utils/theme/app_theme.dart';
 import 'package:smart_store_linux/presentation/common/widgets/navigation/sidebar.dart';
-import 'package:smart_store_linux/presentation/features/dashboard/dashboard_screen.dart';
-import 'package:smart_store_linux/presentation/features/models/models_screen.dart';
-import 'package:smart_store_linux/presentation/features/streams/streams_screen.dart';
-import 'package:smart_store_linux/presentation/features/configuration/configuration_screen.dart';
+import 'package:smart_store_linux/presentation/views/dashboard/dashboard_screen.dart';
+import 'package:smart_store_linux/presentation/views/models/models_screen.dart';
+import 'package:smart_store_linux/presentation/views/streams/streams_screen.dart';
+import 'package:smart_store_linux/presentation/views/configuration/configuration_screen.dart';
 
-import 'package:smart_store_linux/presentation/features/playback/playback_screen.dart';
-import 'package:smart_store_linux/presentation/features/plugins/plugins_screen.dart';
-import 'package:smart_store_linux/presentation/features/events_log/events_screen.dart';
+import 'package:smart_store_linux/presentation/views/playback/playback_screen.dart';
+import 'package:smart_store_linux/presentation/views/plugins/plugins_screen.dart';
+import 'package:smart_store_linux/presentation/views/events_log/events_screen.dart';
 
 class MainLayout extends StatefulWidget {
   const MainLayout({super.key});

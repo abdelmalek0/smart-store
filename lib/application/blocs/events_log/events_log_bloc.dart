@@ -19,7 +19,7 @@ class EventsLogBloc extends Bloc<EventsLogEvent, EventsLogState> {
     on<EventsLogStarted>(_onStarted);
     on<EventsLogEventReceived>(_onEventReceived);
     on<EventsLogCleared>(_onCleared);
-    on<EventsLogMockAdded>(_onMockAdded);
+
   }
 
   Future<void> _onStarted(
@@ -45,20 +45,6 @@ class EventsLogBloc extends Bloc<EventsLogEvent, EventsLogState> {
     emit(const EventsLogState());
   }
 
-  void _onMockAdded(EventsLogMockAdded event, Emitter<EventsLogState> emit) {
-    final data = event.eventData;
-    final appEvent = SystemEvent(
-      eventId: DateTime.now().millisecondsSinceEpoch.toString(),
-      timestamp: data['timestamp'] ?? DateTime.now().millisecondsSinceEpoch,
-      streamId: data['streamId'] ?? 'unknown',
-      message: data['data']?['msg'] ?? 'Mock Event',
-      severity: EventSeverity.fromString(data['eventType']?.toString()),
-      type: data['eventType'] ?? 'system',
-    );
-    final updated = [appEvent, ...state.events];
-    if (updated.length > _maxEvents) updated.removeLast();
-    emit(state.copyWith(events: updated));
-  }
 
   @override
   Future<void> close() {

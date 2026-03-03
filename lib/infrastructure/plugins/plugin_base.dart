@@ -38,21 +38,17 @@ abstract class SmartStorePlugin {
   /// The plugin should decide to run inference, pass it through, or ignore it.
   Future<void> processFrame(RawFrame frame);
 
-  /// Process a frame that already has detections (Optimized Path)
-  /// Default implementation: Treats it as an inference result
   Future<void> processDirectDetections(
     RawFrame frame,
     List<dynamic> detections,
   ) async {
-    // We generate a fake requestId just to map it (internally)
     final requestId = _requestIdCounter++;
     _pendingFrames[requestId] = frame;
 
-    // Direct callback
     await handleInferenceResult({
       'requestId': requestId,
       'detections': detections,
-      'processingStartMs': frame.decodeTimestamp, // Approx
+      'processingStartMs': frame.decodeTimestamp,
     });
   }
 
@@ -117,7 +113,6 @@ abstract class SmartStorePlugin {
     _sendToHost({
       'type': 'emit_display_frame',
       'streamId': _streamId,
-      // optimized: send detection data, original frame might be cached on host or we send it back
       'frame': frame != null
           ? TransferableTypedData.fromList([frame.bytes])
           : null,
@@ -134,11 +129,8 @@ abstract class SmartStorePlugin {
     _hostPort?.send(message);
   }
 
-  /// Handle internal messages (like inference results)
-  /// This is called by the PluginIsolate entry point
   void handleMessage(dynamic message) {
     if (message is Map && message['type'] == 'inference_result') {
-      // handleInferenceResult(message) is abstract, implemented by subclass
       handleInferenceResult(message.cast<String, dynamic>());
     }
   }

@@ -1,11 +1,9 @@
-import 'package:smart_store_linux/application/config/config_service.dart';
+import 'package:smart_store_linux/domain/repositories/i_config_repository.dart';
 import 'package:smart_store_linux/domain/entities/config/plugin_config.dart';
 
-/// Persists an updated [PluginConfig] (model assignment, params, enabled state).
+/// Updates a plugin's configuration (e.g. assigned model, parameters).
 class UpdatePlugin {
-  final ConfigService _configService;
-
-  UpdatePlugin(this._configService);
-
-  Future<void> call(PluginConfig plugin) => _configService.updatePlugin(plugin);
+  final IConfigRepository _repo;
+  UpdatePlugin(this._repo);
+  Future<void> call(PluginConfig plugin) => _repo.updatePlugin(plugin);
 }

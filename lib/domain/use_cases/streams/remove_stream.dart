@@ -1,10 +1,8 @@
-import 'package:smart_store_linux/application/config/config_service.dart';
+import 'package:smart_store_linux/domain/repositories/i_config_repository.dart';
 
-/// Removes a stream by its [streamId] from the configuration.
+/// Removes a stream from the configuration.
 class RemoveStream {
-  final ConfigService _configService;
-
-  RemoveStream(this._configService);
-
-  Future<void> call(String streamId) => _configService.removeStream(streamId);
+  final IConfigRepository _repo;
+  RemoveStream(this._repo);
+  Future<void> call(String streamId) => _repo.removeStream(streamId);
 }

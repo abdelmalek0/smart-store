@@ -27,11 +27,6 @@ class PeopleCountingPlugin extends SmartStorePlugin {
 
   @override
   Future<void> processFrame(RawFrame frame) async {
-    // Run inference on every frame for smooth visualization
-    // TODO: optimization - skip inference if busy, but always pass frame?
-    // debugPrint("--------------------------------------------------");
-    // debugPrint("People Counting Plugin Configuration:");
-    // debugPrint("  Confidence Threshold: $_confidenceThreshold");
     requestInference(frame, _modelPath);
   }
 
@@ -54,13 +49,6 @@ class PeopleCountingPlugin extends SmartStorePlugin {
       }
     }
 
-    // DEBUG: Log detections to verify inference
-    // if (detections.isNotEmpty) {
-    // debugPrint(
-    //   "PeopleCountingPlugin: Frame processed. Total Detections: ${detections.length}, Persons: $personCount",
-    // );
-    // }
-
     // Smoothing logic (simple moving average)
     _recentCounts.add(personCount);
     if (_recentCounts.length > maxHistory) {
@@ -76,16 +64,11 @@ class PeopleCountingPlugin extends SmartStorePlugin {
           : (_recentCounts.reduce((a, b) => a + b) / _recentCounts.length)
                 .round();
 
-      // DEBUG: Log event triggering
-      // debugPrint(
-      //   "PeopleCountingPlugin: Check. Count: $avgCount (Recent: $_recentCounts)",
-      // );
-
-      // Requirement: Only emit if people are detected (> 0)
+      // Emit event if people are detected.
       if (avgCount > 0) {
         emitEvent('People Count', {
           'count': avgCount,
-          'label': 'Person', // Defined label to avoid 'unknown'
+          'label': 'Person',
           'msg': 'Detected $avgCount people',
         });
       }
@@ -101,8 +84,7 @@ class PeopleCountingPlugin extends SmartStorePlugin {
     final inferenceEndMs = DateTime.now().millisecondsSinceEpoch;
 
     emitDisplayFrame(frame, personDetections, {
-      'decode':
-          0, // lost this info unless we passed it through requestInference->result meta
+      'decode': 0,
       'inference': (processingStartMs > 0)
           ? (inferenceEndMs - processingStartMs)
           : 0,

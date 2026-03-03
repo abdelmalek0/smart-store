@@ -1,11 +1,9 @@
-import 'package:smart_store_linux/application/config/config_service.dart';
+import 'package:smart_store_linux/domain/repositories/i_config_repository.dart';
 import 'package:smart_store_linux/domain/entities/config/stream_config.dart';
 
-/// Returns the current list of configured streams.
+/// Returns all configured streams.
 class GetStreams {
-  final ConfigService _configService;
-
-  GetStreams(this._configService);
-
-  List<StreamConfig> call() => _configService.streams;
+  final IConfigRepository _repo;
+  GetStreams(this._repo);
+  List<StreamConfig> call() => _repo.currentConfig.streams;
 }

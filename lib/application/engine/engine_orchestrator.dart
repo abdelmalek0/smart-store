@@ -1,13 +1,12 @@
-import 'dart:async';
 import 'dart:collection';
 import 'package:flutter/foundation.dart';
-import 'package:smart_store_linux/application/config/config_service.dart';
 import 'package:smart_store_linux/application/engine/pipeline.dart';
 import 'package:smart_store_linux/infrastructure/plugins/plugin_orchestrator.dart';
 import 'package:smart_store_linux/infrastructure/rendering/rendering_orchestrator.dart';
 import 'package:smart_store_linux/infrastructure/streaming/stream_orchestrator.dart';
 import 'package:smart_store_linux/infrastructure/ai/inference_orchestrator.dart';
 import 'package:smart_store_linux/application/engine/pipeline_registry.dart';
+import 'package:smart_store_linux/domain/repositories/i_config_repository.dart';
 
 // ===========================================================================
 // SMART STORE STREAM PROCESSING ARCHITECTURE
@@ -18,8 +17,9 @@ import 'package:smart_store_linux/application/engine/pipeline_registry.dart';
 /// Responsibilities:
 /// - Creating and managing [Pipeline] instances.
 /// - Starting/stopping pipelines.
-/// - Coordinating with [ModelRuntime], [StreamManager], and [ConfigService].
-class EngineOrchestrator extends ChangeNotifier {
+/// - Coordinating with [InferenceOrchestrator], [StreamOrchestrator],
+///   and [IConfigRepository].
+class EngineOrchestrator {
   static final EngineOrchestrator _instance = EngineOrchestrator._internal();
   factory EngineOrchestrator() => _instance;
   static EngineOrchestrator get instance => _instance;
@@ -34,7 +34,7 @@ class EngineOrchestrator extends ChangeNotifier {
       PipelineRegistry.instance.pipelines.any((p) => !p.isFrozen);
 
   /// Start all pipelines based on current configuration.
-  Future<void> startAll() async {
+  Future<void> startAll(IConfigRepository repo) async {
     debugPrint('EngineOrchestrator: Starting all pipelines...');
 
     // Clean up any frozen pipelines first
@@ -48,9 +48,8 @@ class EngineOrchestrator extends ChangeNotifier {
       }
     }
 
-    // 1. Init Config Service
-    await ConfigService.instance.init();
-    final config = ConfigService.instance.config;
+    // 1. Load config (already in cache after AppService.init)
+    final config = repo.currentConfig;
 
     // 2. Init Model Manager
     InferenceOrchestrator.instance.initialize(config.models);
@@ -62,54 +61,47 @@ class EngineOrchestrator extends ChangeNotifier {
     for (var streamConfig in config.streams) {
       if (!streamConfig.enabled) continue;
 
-      // Skip if already exists
       if (PipelineRegistry.instance.isRegistered(streamConfig.id)) {
         debugPrint('[SKIP] Pipeline for ${streamConfig.id} already exists');
         continue;
       }
 
-      // Inject all manager dependencies — EngineOrchestrator is the wiring point.
       final pipeline = Pipeline(
         streamId: streamConfig.id,
         streamManager: StreamOrchestrator.instance,
         pluginManager: PluginOrchestrator.instance,
         renderingManager: RenderingOrchestrator.instance,
-        config: ConfigService.instance,
+        repo: repo,
       );
 
       debugPrint('[INIT] Pipeline for stream: ${streamConfig.id}');
-
-      // Await initialization (subscribes to streams, activates plugins)
-      // Note: Pipeline.initialize() registers itself in PipelineRegistry.
       await pipeline.initialize();
-      notifyListeners();
 
-      // Stagger startup to avoid resource spike
       await Future.delayed(const Duration(milliseconds: 500));
     }
   }
 
   /// Update the model assigned to a stream
-  Future<void> updateStreamModel(String streamId, String? modelPath) async {
-    final stream = ConfigService.instance.getStream(streamId);
+  Future<void> updateStreamModel(
+    IConfigRepository repo,
+    String streamId,
+    String? modelPath,
+  ) async {
+    final stream = repo.getStream(streamId);
     if (stream != null) {
-      // If modelPath is null, clear assignment
       if (modelPath == null) {
-        await ConfigService.instance.updateStream(
-          stream.copyWith(clearAssignedModel: true),
-        );
+        await repo.updateStream(stream.copyWith(clearAssignedModel: true));
       } else {
-        // Find model by path
         try {
-          final modelConfig = ConfigService.instance.models.firstWhere(
+          final modelConfig = repo.currentConfig.models.firstWhere(
             (m) => m.path == modelPath,
           );
-          await ConfigService.instance.updateStream(
+          await repo.updateStream(
             stream.copyWith(assignedModelId: modelConfig.id),
           );
         } catch (e) {
           debugPrint(
-            "EngineOrchestrator: Could not find model for path $modelPath",
+            'EngineOrchestrator: Could not find model for path $modelPath',
           );
         }
       }
@@ -118,25 +110,18 @@ class EngineOrchestrator extends ChangeNotifier {
 
   /// Stop all pipelines and release resources
   Future<void> stopAll() async {
-    debugPrint("EngineOrchestrator: Stopping (full shutdown)...");
+    debugPrint('EngineOrchestrator: Stopping (full shutdown)...');
     await clearAll();
-    debugPrint("EngineOrchestrator: Stopped.");
-    notifyListeners();
+    debugPrint('EngineOrchestrator: Stopped.');
   }
 
   /// Clear all pipelines
   Future<void> clearAll() async {
-    debugPrint("EngineOrchestrator: Clearing all pipelines...");
+    debugPrint('EngineOrchestrator: Clearing all pipelines...');
 
-    // Dispose all pipelines
     for (var p in PipelineRegistry.instance.pipelines) {
       await p.dispose();
     }
-    // Clear registry by iterating and unregistering? Or just assume dispose does it?
-    // Pipeline.dispose doesn't unregister itself usually.
-    // We should clear the registry here.
-    // But iterating and removing is tricky.
-    // Let's iterate keys.
     final ids = PipelineRegistry.instance.pipelines
         .map((p) => p.streamId)
         .toList();
@@ -144,14 +129,10 @@ class EngineOrchestrator extends ChangeNotifier {
       PipelineRegistry.instance.unregister(id);
     }
 
-    // Also dispose all streams in StreamManager
     await StreamOrchestrator.instance.disposeAll();
-
-    // Release inference service
     await InferenceOrchestrator.instance.release();
 
-    debugPrint("EngineOrchestrator: All resources cleared");
-    notifyListeners();
+    debugPrint('EngineOrchestrator: All resources cleared');
   }
 
   /// Get a specific pipeline by stream ID

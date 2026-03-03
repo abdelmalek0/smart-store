@@ -7,16 +7,21 @@ import 'package:smart_store_linux/presentation/common/utils/theme/app_theme.dart
 import 'package:smart_store_linux/application/services/app_service.dart';
 import 'package:smart_store_linux/application/di/injection_container.dart';
 import 'package:smart_store_linux/presentation/common/layout/main_layout.dart';
+import 'package:smart_store_linux/infrastructure/repositories/config_repository.dart';
 import 'package:smart_store_linux/infrastructure/system/utils/permission_utils.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // 1. Initialize App Services (Config, System, Native Inference)
-  await AppService.instance.init();
+  // 1. Create the repository (loads config from disk, seeds cache & stream)
+  final repo = ConfigRepository.instance;
 
-  // 2. Register all dependencies with get_it
-  configureDependencies();
+  // 2. Initialize App Services (Config load, System, Native Inference)
+  await AppService.instance.init(repo);
+
+  // 3. Register all dependencies with get_it
+  configureDependencies(repo);
+
 
   if (Platform.isAndroid) {
     await PermissionUtils.requestAndroidPermissions();

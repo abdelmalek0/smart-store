@@ -1,10 +1,8 @@
-import 'package:smart_store_linux/application/config/config_service.dart';
+import 'package:smart_store_linux/domain/repositories/i_config_repository.dart';
 
-/// Removes an AI model by its [modelId].
+/// Removes an AI model from the configuration.
 class RemoveModel {
-  final ConfigService _configService;
-
-  RemoveModel(this._configService);
-
-  Future<void> call(String modelId) => _configService.removeModel(modelId);
+  final IConfigRepository _repo;
+  RemoveModel(this._repo);
+  Future<void> call(String modelId) => _repo.removeModel(modelId);
 }

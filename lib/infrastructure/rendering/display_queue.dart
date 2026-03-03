@@ -56,9 +56,7 @@ class DisplayQueue {
 
       try {
         if (_displayQueue.isNotEmpty) {
-          // Drain all but the newest frame to stay real-time.
-          // If inference is slower than capture, old processed frames pile up;
-          // we only ever want to show the most recent one.
+          // Drain stale frames so only the latest is shown.
           while (_displayQueue.length > 1) {
             final stale = _displayQueue.removeFirst();
             try {
@@ -80,34 +78,24 @@ class DisplayQueue {
               "DisplayQueue: Dropping stale frame TS=${frameToDisplay.decodeStartMs} Lag=${lag}ms",
             );
 
-            // CRITICAL: Flush from native buffer
-            // We need to know the native Video ID or Texture ID to flush.
-            // DisplayQueue doesn't natively know the TextureID.
-            // However, we can use StreamOrchestrator to look it up, or pass it in.
-            // But DisplayQueue is in `core/rendering/queue`.
-            // Ideally we use VideoBridge directly if we knew the Texture ID.
-
+            // Flush from native buffer before discarding.
             try {
               final tid = StreamOrchestrator.instance.getTextureManagerId(streamId);
               if (tid != null) {
                 _bridge.showFrame(tid, frameToDisplay.decodeStartMs);
               }
-            } catch (e) {
-              // Ignore
-            }
+            } catch (_) {}
 
-            // Loop again to get next frame
             frameToDisplay = null;
             continue;
           }
 
           if (_isFrozen) {
-            // Remove detections if frozen
             frameToDisplay = ProcessedFrame(
               imageBytes: frameToDisplay.imageBytes,
               width: frameToDisplay.width,
               height: frameToDisplay.height,
-              detections: [], // Clean detections
+              detections: [],
               decodeStartMs: frameToDisplay.decodeStartMs,
               generationTimeMs: frameToDisplay.generationTimeMs,
               preprocessEndMs: frameToDisplay.preprocessEndMs,

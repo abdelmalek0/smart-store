@@ -2,25 +2,24 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:smart_store_linux/application/config/config_service.dart';
 import 'package:smart_store_linux/application/services/app_service.dart';
-import 'package:smart_store_linux/domain/use_cases/engine/toggle_engine.dart';
+import 'package:smart_store_linux/domain/entities/config/app_config.dart';
+import 'package:smart_store_linux/domain/repositories/i_config_repository.dart';
 import 'dashboard_event.dart';
 import 'dashboard_state.dart';
 
 class DashboardBloc extends Bloc<DashboardEvent, DashboardState> {
-  final ToggleEngine _toggleEngine;
   final AppService _appService;
   final SystemService _systemService;
-  StreamSubscription<void>? _configSub;
+  final IConfigRepository _repo;
 
   DashboardBloc({
-    required ToggleEngine toggleEngine,
     required AppService appService,
     required SystemService systemService,
-  }) : _toggleEngine = toggleEngine,
-       _appService = appService,
+    required IConfigRepository repo,
+  }) : _appService = appService,
        _systemService = systemService,
+       _repo = repo,
        super(
          DashboardState(
            supportsVRAM:
@@ -38,13 +37,13 @@ class DashboardBloc extends Bloc<DashboardEvent, DashboardState> {
     DashboardStarted event,
     Emitter<DashboardState> emit,
   ) async {
-    // Emit initial counts from config
+    final config = _repo.currentConfig;
     emit(
       state.copyWith(
         isEngineRunning: _appService.isEngineRunning,
-        cameraCount: ConfigService.instance.streams.length,
-        modelCount: ConfigService.instance.models.length,
-        pluginCount: ConfigService.instance.availablePlugins.length,
+        cameraCount: config.streams.length,
+        modelCount: config.models.length,
+        pluginCount: config.plugins.length,
         stats: Map<String, double>.from(_systemService.stats),
         cpuName: _systemService.cpuName,
         gpuName: _systemService.gpuName,
@@ -54,7 +53,7 @@ class DashboardBloc extends Bloc<DashboardEvent, DashboardState> {
       ),
     );
 
-    // Listen to system service changes via stream
+    // Listen to system service changes
     void onSystemUpdate() {
       add(
         DashboardSystemStatsUpdated(
@@ -68,36 +67,27 @@ class DashboardBloc extends Bloc<DashboardEvent, DashboardState> {
       );
     }
 
-    void onConfigUpdate() {
-      add(
-        DashboardConfigUpdated(
-          cameraCount: ConfigService.instance.streams.length,
-          modelCount: ConfigService.instance.models.length,
-          pluginCount: ConfigService.instance.availablePlugins.length,
-        ),
-      );
-    }
-
     _systemService.addListener(onSystemUpdate);
-    ConfigService.instance.addListener(onConfigUpdate);
 
-    await emit.onEach(
-      Stream<void>.periodic(
-        const Duration(seconds: 1),
-      ).take(0).asBroadcastStream(),
-      onData: (_) {},
-      onError: (_, _) {},
+    // React to config changes via configStream
+    await emit.forEach<AppConfig>(
+      _repo.configStream,
+      onData: (cfg) => state.copyWith(
+        cameraCount: cfg.streams.length,
+        modelCount: cfg.models.length,
+        pluginCount: cfg.plugins.length,
+      ),
+      onError: (_, _) => state,
     );
 
-    // Keep listeners alive — cleaned up in close()
-    _configSub = Stream<void>.empty().listen((_) {});
+    _systemService.removeListener(onSystemUpdate);
   }
 
   Future<void> _onToggleEngine(
     DashboardEngineToggleRequested event,
     Emitter<DashboardState> emit,
   ) async {
-    await _toggleEngine();
+    await _appService.toggleEngine();
     emit(state.copyWith(isEngineRunning: _appService.isEngineRunning));
   }
 
@@ -128,11 +118,5 @@ class DashboardBloc extends Bloc<DashboardEvent, DashboardState> {
         pluginCount: event.pluginCount,
       ),
     );
-  }
-
-  @override
-  Future<void> close() {
-    _configSub?.cancel();
-    return super.close();
   }
 }

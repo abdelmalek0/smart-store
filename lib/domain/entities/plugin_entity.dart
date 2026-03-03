@@ -35,3 +35,30 @@ class PluginEntity extends Equatable {
     defaultConfig,
   ];
 }
+
+/// Static catalogue of all built-in plugins available in the system.
+///
+/// This is domain knowledge — it never changes at runtime and has no external
+/// dependencies. Move here from ConfigService.availablePlugins.
+const List<PluginEntity> kAvailablePlugins = [
+  PluginEntity(
+    id: 'people_counting',
+    name: 'People Counting',
+    description: 'Initializes YOLO model to count people.',
+    iconName: 'people_counting',
+    isActive: true,
+    defaultConfig: {'personClassId': 0, 'confidenceThreshold': 0.5},
+  ),
+  PluginEntity(
+    id: 'kitchen_supervision',
+    name: 'Kitchen Supervision',
+    description: 'Detects bare hands (no gloves) for 5 seconds.',
+    iconName: 'kitchen_supervision',
+    isActive: true,
+    defaultConfig: {
+      'handClassId': 4,
+      'gloveClassId': 0,
+      'confidenceThreshold': 0.5,
+    },
+  ),
+];
