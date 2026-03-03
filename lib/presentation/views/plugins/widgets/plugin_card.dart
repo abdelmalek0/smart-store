@@ -4,7 +4,6 @@ import 'package:smart_store_linux/domain/entities/plugin_entity.dart';
 import 'package:smart_store_linux/application/blocs/plugins/plugins_bloc.dart';
 import 'package:smart_store_linux/application/blocs/plugins/plugins_event.dart';
 import 'package:smart_store_linux/application/blocs/plugins/plugins_state.dart';
-import 'package:smart_store_linux/presentation/common/utils/plugin_catalog.dart';
 
 class PluginCard extends StatelessWidget {
   final PluginEntity plugin;
@@ -53,7 +52,7 @@ class PluginCard extends StatelessWidget {
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Icon(
-                      PluginCatalog.iconFor(plugin.iconName),
+                      Icons.extension_rounded,
                       color: isEnabled ? const Color(0xFF3B82F6) : Colors.grey,
                       size: 24,
                     ),
