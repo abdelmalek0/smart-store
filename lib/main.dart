@@ -62,9 +62,9 @@ class _SmartStoreAppState extends State<SmartStoreApp>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     // Register window listener for proper shutdown
-    if (Platform.isLinux || Platform.isWindows || Platform.isMacOS) {
-      windowManager.setPreventClose(true);
-    }
+    // if (Platform.isLinux || Platform.isWindows || Platform.isMacOS) {
+    //   windowManager.setPreventClose(true);
+    // }
   }
 
   @override
