@@ -4,7 +4,7 @@
 
 **Smart Store** is a high-performance, real-time video analytics platform designed for retail store monitoring. It leverages hardware-accelerated AI to process multiple video streams simultaneously, detecting objects and events in real-time.
 
-The system is built on a **Layered Architecture** to ensure separation of concerns, maintainability, and scalability. It employs an **Event-Driven** approach to decouple video processing logic from the user interface.
+The system is built on **Clean Architecture** to enforce a strict dependency rule (outer layers depend inward, never the reverse) and an **Event-Driven** approach to decouple video processing from the user interface.
 
 ### Key Capabilities
 *   **Multi-Stream Processing**: Capable of decoding and analyzing 2-10+ concurrent video streams.
@@ -17,78 +17,121 @@ The system is built on a **Layered Architecture** to ensure separation of concer
 
 ## 2. Architectural Layers
 
-The application is organized into four distinct layers, each with a specific responsibility.
+The application is organized into four layers. Dependencies **only flow inward** — outer layers know about inner layers, never the other way around.
 
-### 2.1 UI Layer (`lib/ui`)
-The Presentation Layer is built using Flutter. It is responsible for rendering the user interface and handling user interactions.
-*   **Screens**: High-level views (e.g., Dashboard, Settings, Camera Grid).
-*   **Widgets**: Reusable UI components (e.g., VideoPlayer, EventCard).
-*   **State Management**: Uses the Provider pattern and ViewModels to manage UI state and separate business logic from rendering code.
-*   **Interaction**: Listens to the Core Layer for updates but does not continuously query it.
+```
+┌──────────────────────────────────┐
+│         Presentation             │  Flutter UI, BLoCs, Widgets
+├──────────────────────────────────┤
+│         Application              │  Engine, Orchestration, Events, DI
+├──────────────────────────────────┤
+│            Domain                │  Entities, Use Cases, Repository Interfaces
+├──────────────────────────────────┤
+│        Infrastructure            │  AI, Streaming, Rendering, Repositories
+└──────────────────────────────────┘
+        ↑  Native Packages (FFI)
+  native_onnx (Linux) / native_rknn (Android)
+```
 
-### 2.2 Core Layer (`lib/core`)
-The Business Logic Layer serves as the central orchestration engine of the application.
-*   **Engine**: Manages the video processing pipeline. It coordinates the flow of frames from capture to inference to display.
-*   **Events**: A centralized **Event Service** acts as the backbone for application-wide communication. It broadcasts typed events (e.g., `DetectionEvent`, `SystemEvent`) to subscribers.
-*   **Plugins**: An extensible **Plugin Manager** allows specific analytic modules (like People Counting) to subscribe to inference results and trigger logic.
-*   **Streaming**: Handles the complexity of platform-specific video capture and decoding, providing a unified interface to the rest of the app.
-*   **Config**: Manages application settings, pipeline constants, and resource allocation.
+### 2.1 Presentation Layer (`lib/presentation`)
+The UI layer is built with Flutter and is responsible only for rendering and user input.
+*   **Views**: High-level screens (e.g., Playback Screen, Settings).
+*   **Widgets**: Reusable UI components (e.g., Camera Grid, Stream Player, Event Cards).
+*   **BLoCs**: React to application-layer events and user actions, then emit new UI states. The presentation layer **never calls use cases directly** — it dispatches events to BLoCs.
 
-### 2.3 AI Layer (`lib/ai`)
-The Intelligence Layer is dedicated to machine learning operations.
-*   **Isolation**: All inference tasks run in a dedicated background **Isolate**. This ensures that heavy computation never blocks the UI thread.
-*   **Abstraction**: A unified **Inference Backend** interface hides the differences between underlying execution providers (ONNX Runtime on Linux, RKNN on Android).
-*   **Worker**: A persistent worker process manages model loading, batching, and execution.
+### 2.2 Application Layer (`lib/application`)
+The orchestration hub of the application. Contains no domain business rules and no infrastructure details.
+*   **Engine**: The `Pipeline` and `RenderingOrchestrator` coordinate frame flow from capture → inference → display for each active stream.
+*   **BLoCs**: Bridge between the presentation and domain layers. They invoke domain use cases and translate results into UI-ready state.
+*   **Events**: An `EventBus` singleton provides publish-subscribe messaging across the application (e.g., `DetectionEvent`, `StreamStatusEvent`).
+*   **DI**: Dependency injection wiring that assembles concrete infrastructure implementations against domain interfaces.
 
-### 2.4 Data Layer (`lib/data`)
-The Persistence Layer manages long-term data storage.
-*   **Repositories**: Provide clean APIs for accessing data, abstracting the underlying storage mechanism.
-*   **Services**: Handle direct interactions with databases, file systems, or remote APIs.
+### 2.3 Domain Layer (`lib/domain`)
+The innermost layer. Contains pure business logic with **zero Flutter or platform dependencies**.
+*   **Entities**: Core data models — `StreamSource`, `Detection`, `PluginConfig`, etc.
+*   **Use Cases**: Single-responsibility operations — `AddStream`, `StartInference`, `GetDetections`, etc. Each use case depends only on repository interfaces.
+*   **Repository Interfaces**: Contracts (abstract classes) that the infrastructure layer must implement. The domain never imports infrastructure.
 
----
-
-## 3. Core Subsystems
-
-### 3.1 Video Processing Pipeline
-The pipeline is the critical path for video data. It operates in a loop for each active stream:
-1.  **Capture**: Video frames are decoded asynchronously. On Linux, this happens directly on the GPU.
-2.  **Inference Queue**: Frames are pushed to a bounded queue for analysis.
-3.  **Inference**: The AI Layer processes the frame and returns a list of detections.
-4.  **Display Queue**: Processed frames, now carrying metadata, are pushed to the UI for rendering.
-
-### 3.2 Event System
-The application uses a **Publish-Subscribe** pattern for events.
-*   **Producers**: The AI Layer and Plugins produce events based on analysis (e.g., "Person Detected").
-*   **Bus**: The `EventService` singleton receives these events.
-*   **Consumers**: The UI (specifically `EventsViewModel`) listens to the service and updates the interface in real-time. This ensures the UI is reactive and decoupled from the heavy lifting of video processing.
-
-### 3.3 Zero-Copy Rendering (Linux)
-To achieve high performance on Linux, the system avoids copying video frames between CPU and GPU memory.
-1.  Video is decoded by **NVDEC** directly into GPU memory.
-2.  Preprocessing (resizing, normalization) is performed by **CUDA**.
-3.  Inference is run by **TensorRT/CUDA** execution providers.
-4.  The frame is passed to OpenGL as a texture resource without ever leaving the GPU.
-5.  Flutter renders this texture directly.
+### 2.4 Infrastructure Layer (`lib/infrastructure`)
+Concrete implementations of everything domain and application layers need.
+*   **AI** (`infrastructure/ai`): ONNX Runtime worker and inference coordinator. Runs inference in a background isolate to keep the UI thread free.
+*   **Streaming** (`infrastructure/streaming`): Platform-specific video capture — FFmpeg/NVDEC on Linux, MediaCodec on Android — exposed through a unified interface.
+*   **Rendering** (`infrastructure/rendering`): OpenGL texture management and the `RenderingOrchestrator` that wires GPU textures into Flutter.
+*   **Plugins** (`infrastructure/plugins`): Analytic modules (e.g., People Counter) that post-process detections and fire domain events.
+*   **Repositories** (`infrastructure/repositories`): Concrete data access — config file I/O, SQLite, etc.
+*   **System** (`infrastructure/system`): Low-level helpers (permissions, platform diagnostics).
 
 ---
 
-## 4. Concurrency Model
+## 3. Native Packages
 
-Understanding the threading model is crucial for performance tuning.
+GPU acceleration is provided by two local Flutter FFI plugins in `packages/`:
 
-*   **Main Isolate (UI Thread)**: Handles rendering, user input, and state updates. It must never be blocked.
-*   **Capture Isolates**: Each video stream runs its decoding loop in a separate isolate. This allows the system to scale to multiple cameras without choking the UI.
-*   **Inference Isolate**: A single, shared isolate handles model execution for all streams. This serializes inference requests to prevent GPU memory saturation.
+### `packages/native_onnx` (Linux only)
+A C++ Flutter plugin that forms the hot path for GPU inference.
+
+| Component | Library |
+| :--- | :--- |
+| AI Runtime | ONNX Runtime v1.22 (CUDA + TensorRT execution providers) |
+| Video Decoding | FFmpeg (libavcodec/avformat) + NVDEC hardware decoder |
+| GPU Preprocessing | OpenCV 4.10 (CUDA modules: cudaimgproc, cudawarping) |
+| Texture Sharing | OpenGL / EGL (zero-copy GPU→Flutter texture) |
+| CUDA Runtime | CUDA 12 (`libcudart.so.12`) |
+| cuDNN | cuDNN 9 (`libcudnn.so.9`) |
+
+All shared libraries (`libonnxruntime*.so`, `libcudart`, `libcudnn`) are staged in `packages/native_onnx/linux/libs/` and bundled into the app at build time via Flutter's plugin CMake system.
+
+### `packages/native_rknn` (Android only)
+A C++ Flutter plugin wrapping the RKNN NPU SDK for Rockchip-based Android devices (e.g., Orange Pi 5). It provides a Flutter FFI interface to hardware-accelerated neural network inference on the NPU.
 
 ---
 
-## 5. Technology Stack
+## 4. Core Subsystems
+
+### 4.1 Video Processing Pipeline
+The pipeline is the critical hot path for each active stream:
+1.  **Capture**: `VideoManager` (C++) decodes frames via FFmpeg+NVDEC directly into GPU memory.
+2.  **Preprocess**: `ImageProcessor` (C++/CUDA) resizes and normalizes the GPU frame in-place.
+3.  **Inference**: `InferenceManager` (C++) dispatches the GPU tensor to ONNX Runtime; results are returned as detection boxes.
+4.  **Display**: `TextureManager` (C++) registers the processed GPU frame as an OpenGL texture, which Flutter renders zero-copy.
+
+The Dart-side `Pipeline` (application layer) coordinates the isolate lifecycle and back-pressure between these stages.
+
+### 4.2 Event System
+The application uses a **Publish-Subscribe** pattern via `EventBus`.
+*   **Producers**: The inference pipeline and analytic plugins emit typed events (e.g., `PersonDetectedEvent`).
+*   **Consumers**: BLoCs and the presentation layer subscribe to relevant event streams and update UI state reactively.
+
+### 4.3 Zero-Copy Rendering (Linux)
+To achieve maximum throughput, frames never touch CPU memory:
+1.  NVDEC decodes the video directly into a CUDA GPU buffer.
+2.  OpenCV CUDA kernels preprocess the frame (resize → normalize) in-place on the GPU.
+3.  ONNX Runtime (CUDA EP) runs inference on the GPU buffer.
+4.  The output frame is imported into OpenGL as an `EGLImage`/`GL_TEXTURE_2D` without a CPU round-trip.
+5.  Flutter renders the texture directly via the platform texture registry.
+
+---
+
+## 5. Concurrency Model
+
+| Thread / Isolate | Responsibility |
+| :--- | :--- |
+| **Main Isolate (UI Thread)** | Flutter rendering, user input, BLoC state updates. Must never block. |
+| **Capture Isolates** | One isolate per active stream. Runs the decode → preprocess → inference → display loop independently. |
+| **Inference Isolate** | Single shared isolate that serializes model execution across streams to prevent GPU memory saturation. |
+| **C++ Threads** | Native plugin threads managed by the C++ layer for async NVDEC decode callbacks. |
+
+---
+
+## 6. Technology Stack
 
 | Component | Linux Implementation | Android Implementation |
 | :--- | :--- | :--- |
-| **Language** | Dart (Flutter) + C++ | Dart (Flutter) + Kotlin/Java |
-| **Video Decoding** | FFmpeg + NVDEC (Hardware) | FFmpeg + MediaCodec (Hardware) |
-| **AI Runtime** | ONNX Runtime (CUDA Execution Provider) | RKNN (Rockchip NPU) |
-| **Preprocessing** | OpenCV (CUDA) | Java Native Interface |
-| **State Management** | Provider + ChangeNotifier | Provider + ChangeNotifier |
+| **Language** | Dart (Flutter) + C++ (FFI plugin) | Dart (Flutter) + C++ (FFI plugin) |
+| **Video Decoding** | FFmpeg + NVDEC (Hardware GPU) | FFmpeg + MediaCodec (Hardware) |
+| **AI Runtime** | ONNX Runtime 1.22 (CUDA + TensorRT EP) | RKNN SDK (Rockchip NPU) |
+| **GPU Preprocessing** | OpenCV 4.10 (CUDA modules) | JNI / Native |
+| **Texture Sharing** | OpenGL / EGL (zero-copy) | SurfaceTexture |
+| **State Management** | BLoC + EventBus | BLoC + EventBus |
 | **Local Storage** | JSON / SQLite | Shared Preferences / SQLite |
+| **Architecture Pattern** | Clean Architecture | Clean Architecture |
