@@ -81,32 +81,7 @@ class EngineOrchestrator {
     }
   }
 
-  /// Update the model assigned to a stream
-  Future<void> updateStreamModel(
-    IConfigRepository repo,
-    String streamId,
-    String? modelPath,
-  ) async {
-    final stream = repo.getStream(streamId);
-    if (stream != null) {
-      if (modelPath == null) {
-        await repo.updateStream(stream.copyWith(clearAssignedModel: true));
-      } else {
-        try {
-          final modelConfig = repo.currentConfig.models.firstWhere(
-            (m) => m.path == modelPath,
-          );
-          await repo.updateStream(
-            stream.copyWith(assignedModelId: modelConfig.id),
-          );
-        } catch (e) {
-          debugPrint(
-            'EngineOrchestrator: Could not find model for path $modelPath',
-          );
-        }
-      }
-    }
-  }
+
 
   /// Stop all pipelines and release resources
   Future<void> stopAll() async {

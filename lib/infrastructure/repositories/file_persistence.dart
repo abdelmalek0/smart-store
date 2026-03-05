@@ -107,23 +107,8 @@ class FilePersistence implements PersistenceRepository {
       }
     }
 
-    // 3. Extract models from Streams
-    if (json['streams'] is List) {
-      final streams = json['streams'] as List;
-      for (var item in streams) {
-        if (item is Map<String, dynamic> && item.containsKey('modelPath')) {
-          final path = item['modelPath'] as String;
-          if (path.isNotEmpty) {
-            final modelId = getOrCreateModel(path, 'Model for ${item['name']}');
-            if (modelId != null) {
-              item['assignedModelId'] = modelId;
-            }
-          }
-          // Remove legacy field
-          item.remove('modelPath');
-        }
-      }
-    }
+    // 3. Extract models from Streams (Removed as models are no longer assigned to streams)
+
 
     // 4. Extract models from Plugins
     if (json['plugins'] is List) {

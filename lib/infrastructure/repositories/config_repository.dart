@@ -151,18 +151,7 @@ class ConfigRepository implements IConfigRepository {
     return null;
   }
 
-  @override
-  String? getEffectiveModelPathForStream(String streamId) {
-    final stream = getStream(streamId);
-    if (stream == null) return null;
-    if (stream.assignedModelId != null) {
-      return getModel(stream.assignedModelId!)?.path;
-    }
-    if (stream.activePluginId != null) {
-      return getModelPathForPlugin(stream.activePluginId!);
-    }
-    return null;
-  }
+
 
   /// Dispose the broadcast controller. Call once on app shutdown.
   void dispose() => _controller.close();

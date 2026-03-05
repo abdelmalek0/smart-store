@@ -6,8 +6,7 @@ import 'package:smart_store_linux/application/engine/engine_orchestrator.dart';
 /// Widget-lifetime controller for managing the playback of a single video stream.
 ///
 /// Tracks FPS, texture ID, and frame sync state, driving widget rebuilds via
-/// [ChangeNotifier]. Belongs in the UI layer — not core — because its lifecycle
-/// is tied to the widget tree.
+/// [ChangeNotifier]
 class StreamPlaybackController extends ChangeNotifier {
   final String streamId;
   final StreamSyncManager _syncManager;

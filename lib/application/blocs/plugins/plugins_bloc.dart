@@ -27,6 +27,7 @@ class PluginsBloc extends Bloc<PluginsEvent, PluginsState> {
       state.copyWith(
         plugins: kAvailablePlugins,
         availableModels: _repo.currentConfig.models,
+        pluginConfigs: _repo.currentConfig.plugins,
       ),
     );
 
@@ -35,6 +36,7 @@ class PluginsBloc extends Bloc<PluginsEvent, PluginsState> {
       onData: (cfg) => state.copyWith(
         plugins: kAvailablePlugins,
         availableModels: cfg.models,
+        pluginConfigs: cfg.plugins,
       ),
       onError: (_, _) => state,
     );

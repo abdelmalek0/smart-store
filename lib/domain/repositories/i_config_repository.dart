@@ -45,8 +45,4 @@ abstract class IConfigRepository {
 
   /// Resolve the model path for a given plugin assignment.
   String? getModelPathForPlugin(String pluginId);
-
-  /// Resolve the effective model path for a stream
-  /// (stream override → active plugin default).
-  String? getEffectiveModelPathForStream(String streamId);
 }

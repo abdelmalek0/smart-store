@@ -35,8 +35,6 @@ class StreamConfig {
     String? name,
     bool? enabled,
     String? activePluginId,
-    String? assignedModelId,
-    bool clearAssignedModel = false,
   }) {
     return StreamConfig(
       id: id ?? this.id,
@@ -44,9 +42,6 @@ class StreamConfig {
       name: name ?? this.name,
       enabled: enabled ?? this.enabled,
       activePluginId: activePluginId ?? this.activePluginId,
-      assignedModelId: clearAssignedModel
-          ? null
-          : (assignedModelId ?? this.assignedModelId),
     );
   }
 }
