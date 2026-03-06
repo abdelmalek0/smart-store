@@ -40,6 +40,8 @@ class InferenceWorker {
 
   final Queue<WorkerRequest> _requestQueue = Queue<WorkerRequest>();
 
+  int _totalFramesProcessed = 0;
+
   // ========================================
   // Configuration Constants - Optimized for Low Latency
   // ========================================
@@ -217,6 +219,14 @@ class InferenceWorker {
           "Result count mismatch: ${results.length} vs ${batch.length}",
         );
         return;
+      }
+
+      int previousCount = _totalFramesProcessed;
+      _totalFramesProcessed += batch.length;
+      if (previousCount ~/ 100 < _totalFramesProcessed ~/ 100) {
+        debugPrint(
+          "🤖 InferenceWorker [${modelPath.split('/').last}]: Processed $_totalFramesProcessed frames",
+        );
       }
 
       // ========================================

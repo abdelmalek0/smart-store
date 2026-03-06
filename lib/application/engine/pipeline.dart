@@ -105,11 +105,6 @@ class Pipeline {
             debugPrint(
               'Pipeline: Loaded ${_modelLabels.length} labels from ${modelConfig.name} (Static Config)',
             );
-          } else {
-            debugPrint(
-              'Pipeline: Static labels empty for ${modelConfig?.name ?? "unknown model"}, '
-              'keeping existing labels (${_modelLabels.length})',
-            );
           }
         }
 
@@ -133,8 +128,11 @@ class Pipeline {
     }
   }
 
+  int _frameCount = 0;
+
   /// Handle Raw Frame from StreamManager
   void _handleRawFrame(RawFrame frame) {
+    _frameCount++;
     if (frame.width > 0) {
       _frameWidth = frame.width;
       _frameHeight = frame.height;
@@ -144,6 +142,9 @@ class Pipeline {
       if (_pluginOutputSubscription != null &&
           !_pluginOutputSubscription!.isPaused) {
         _pluginManager.routeFrame(streamId, frame);
+        // IMPORTANT: We do NOT call releaseSlot here. 
+        // We wait for the plugin to finish its current work and emit a result,
+        // which will trigger the release and the next frame pulse.
       } else {
         final now = DateTime.now().millisecondsSinceEpoch;
         final processed = ProcessedFrame(

@@ -129,9 +129,9 @@ abstract class SmartStorePlugin {
     _hostPort?.send(message);
   }
 
-  void handleMessage(dynamic message) {
+  Future<void> handleMessage(dynamic message) async {
     if (message is Map && message['type'] == 'inference_result') {
-      handleInferenceResult(message.cast<String, dynamic>());
+      await handleInferenceResult(message.cast<String, dynamic>());
     }
   }
 

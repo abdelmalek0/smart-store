@@ -12,7 +12,6 @@ StreamConfig _$StreamConfigFromJson(Map<String, dynamic> json) => StreamConfig(
   name: json['name'] as String? ?? '',
   enabled: json['enabled'] as bool? ?? true,
   activePluginId: json['activePluginId'] as String?,
-  assignedModelId: json['assignedModelId'] as String?,
 );
 
 Map<String, dynamic> _$StreamConfigToJson(StreamConfig instance) =>
@@ -22,5 +21,4 @@ Map<String, dynamic> _$StreamConfigToJson(StreamConfig instance) =>
       'name': instance.name,
       'enabled': instance.enabled,
       'activePluginId': instance.activePluginId,
-      'assignedModelId': instance.assignedModelId,
     };

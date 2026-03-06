@@ -12,16 +12,12 @@ class StreamConfig {
   /// ID of the plugin actively processing this stream
   final String? activePluginId;
 
-  /// Optional: Override model ID for this stream (supercedes plugin default)
-  final String? assignedModelId;
-
   const StreamConfig({
     required this.id,
     required this.url,
     this.name = '',
     this.enabled = true,
     this.activePluginId,
-    this.assignedModelId,
   });
 
   factory StreamConfig.fromJson(Map<String, dynamic> json) =>

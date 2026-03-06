@@ -20,13 +20,18 @@ class PluginOrchestrator {
   // Kept here as per user request: "Controllers should stay in managers"
   final Map<String, StreamController<ProcessedFrame>> _outputControllers = {};
 
-  /// Route a frame to all active plugins for the given stream
-  void routeFrame(String streamId, RawFrame frame) {
+  /// Route a frame to all active plugins for the given stream.
+  /// Returns true if at least one runtime accepted it.
+  bool routeFrame(String streamId, RawFrame frame) {
     // Retrieve runtimes from Registry
     final runtimes = PluginRegistry.instance.get(streamId);
+    bool accepted = false;
     for (final runtime in runtimes) {
-      runtime.processFrame(frame);
+      if (runtime.processFrame(frame)) {
+        accepted = true;
+      }
     }
+    return accepted;
   }
 
   /// Get the aggregated output stream for a stream ID
@@ -59,7 +64,7 @@ class PluginOrchestrator {
     configMap['pluginId'] = pluginId;
     configMap['pluginType'] = pluginId;
 
-    // Resolve model path if assigned
+    // Resolve model path from plugin config
     if (pluginConfig.assignedModelId != null) {
       final model = repo.getModel(pluginConfig.assignedModelId!);
       if (model != null) {

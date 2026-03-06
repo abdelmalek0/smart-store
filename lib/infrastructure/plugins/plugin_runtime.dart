@@ -33,48 +33,74 @@ void pluginWorkerEntry(Map<String, dynamic> args) {
       _pluginFactories[pluginType] ?? _pluginFactories['people_counting']!;
   final plugin = factory();
 
+  debugPrint("🧩 PluginIsolate [$pluginType]: Factory created ${plugin.runtimeType}");
+
   final receivePort = ReceivePort();
   sendPort.send(receivePort.sendPort);
 
-  receivePort.listen((message) {
-    if (message is Map) {
-      if (message['type'] == 'init') {
-        // stdout.writeln("PluginIsolate: Init received");
-        final config = message['config'] as Map<String, dynamic>;
-        final streamId = message['streamId'] as String;
-        plugin.init(sendPort, streamId, config);
-      } else if (message['type'] == 'frame') {
-        // Frame received
-        final transferable = message['frame'] as TransferableTypedData?;
-        final width = message['width'] as int;
-        final height = message['height'] as int;
-        final timestamp = message['timestamp'] as int;
-        final bytes = transferable?.materialize().asUint8List() ?? Uint8List(0);
-        final nativeVideoId = message['nativeVideoId'] as int?;
+  int framesProcessed = 0;
+  String activeStreamId = "unknown";
 
-        final frame = RawFrame(bytes, width, height, timestamp, nativeVideoId: nativeVideoId);
-        plugin.processFrame(frame);
-      } else if (message['type'] == 'frame_with_detections') {
-        // Optimized path: Frame + Detections
-        final transferable = message['frame'] as TransferableTypedData?;
-        final width = message['width'] as int;
-        final height = message['height'] as int;
-        final timestamp = message['timestamp'] as int;
-        final detections = message['detections'] as List<dynamic>;
-        final bytes = transferable?.materialize().asUint8List() ?? Uint8List(0);
-        final nativeVideoId = message['nativeVideoId'] as int?;
+  // Using await for ensures sequential processing of messages.
+  // Crucially, 'init' will finish before any 'frame' is processed.
+  Future<void> runLoop() async {
+    await for (final message in receivePort) {
+      if (message is! Map) continue;
 
-        final frame = RawFrame(bytes, width, height, timestamp, nativeVideoId: nativeVideoId);
-        plugin.processDirectDetections(frame, detections);
-      } else if (message['type'] == 'inference_result') {
-        // stdout.writeln("PluginIsolate: Inference Result Received");
-        plugin.handleMessage(message);
-      } else if (message['type'] == 'dispose') {
-        plugin.dispose();
-        receivePort.close();
+      try {
+        final type = message['type'];
+
+        if (type == 'init') {
+          final config = message['config'] as Map<String, dynamic>;
+          activeStreamId = message['streamId'] as String;
+          debugPrint("🧩 PluginIsolate [$pluginType - $activeStreamId]: Initializing plugin...");
+          await plugin.init(sendPort, activeStreamId, config);
+          
+          // Handshake: Notify host that we are ready
+          sendPort.send({'type': 'init_done', 'streamId': activeStreamId});
+        } else if (type == 'frame') {
+          framesProcessed++;
+          if (framesProcessed % 100 == 0) {
+            debugPrint("🧩 PluginIsolate [$pluginType - $activeStreamId]: Processed $framesProcessed frames");
+          }
+          final transferable = message['frame'] as TransferableTypedData?;
+          final width = message['width'] as int;
+          final height = message['height'] as int;
+          final timestamp = message['timestamp'] as int;
+          final bytes = transferable?.materialize().asUint8List() ?? Uint8List(0);
+          final nativeVideoId = message['nativeVideoId'] as int?;
+
+          final frame = RawFrame(bytes, width, height, timestamp, nativeVideoId: nativeVideoId);
+          await plugin.processFrame(frame);
+        } else if (type == 'frame_with_detections') {
+          framesProcessed++;
+          if (framesProcessed % 100 == 0) {
+            debugPrint("🧩 PluginIsolate [$pluginType - $activeStreamId]: Processed $framesProcessed frames (Direct Detections)");
+          }
+          final transferable = message['frame'] as TransferableTypedData?;
+          final width = message['width'] as int;
+          final height = message['height'] as int;
+          final timestamp = message['timestamp'] as int;
+          final detections = message['detections'] as List<dynamic>;
+          final bytes = transferable?.materialize().asUint8List() ?? Uint8List(0);
+          final nativeVideoId = message['nativeVideoId'] as int?;
+
+          final frame = RawFrame(bytes, width, height, timestamp, nativeVideoId: nativeVideoId);
+          await plugin.processDirectDetections(frame, detections);
+        } else if (type == 'inference_result') {
+          await plugin.handleMessage(message);
+        } else if (type == 'dispose') {
+          await plugin.dispose();
+          receivePort.close();
+          break;
+        }
+      } catch (e, stack) {
+        debugPrint("❌ PluginIsolate [$pluginType - $activeStreamId] Error: $e\n$stack");
       }
     }
-  });
+  }
+
+  runLoop();
 }
 
 class PluginRuntime {
@@ -106,11 +132,17 @@ class PluginRuntime {
       });
 
       final completer = Completer<SendPort>();
+      final initCompleter = Completer<void>();
+      
       _hostReceivePort!.listen((message) {
         if (message is SendPort) {
           if (!completer.isCompleted) completer.complete(message);
         } else if (message is Map) {
-          _handlePluginMessage(message);
+          if (message['type'] == 'init_done') {
+            if (!initCompleter.isCompleted) initCompleter.complete();
+          } else {
+            _handlePluginMessage(message);
+          }
         }
       });
 
@@ -122,6 +154,12 @@ class PluginRuntime {
         'streamId': streamId,
         'config': config,
       });
+
+      // WAIT for initialization to finish before allowing frames or returning
+      await initCompleter.future.timeout(
+        const Duration(seconds: 10),
+        onTimeout: () => debugPrint("⚠️ PluginRuntime [$streamId]: Timeout waiting for init_done"),
+      );
 
       pluginId = config['pluginId'];
 
@@ -144,20 +182,23 @@ class PluginRuntime {
 
   bool _isProcessing = false;
   int _droppedFrames = 0;
+  int _totalReceived = 0;
 
-  void processFrame(RawFrame frame) {
-    if (_isolateSendPort == null) return;
+  bool processFrame(RawFrame frame) {
+    if (_isolateSendPort == null) return false;
+
+    _totalReceived++;
 
     // Leaky Bucket: Drop frame if previous one is still processing
     // This ensures we always process the freshest frame and don't build up a queue
     if (_isProcessing) {
       _droppedFrames++;
-      if (_droppedFrames % 30 == 0) {
+      if (_droppedFrames % 100 == 0) {
         debugPrint(
-          "PluginRuntime: Inference busy, dropped $_droppedFrames frames (Stream: $streamId)",
+          "PluginRuntime [$streamId]: Inference busy, dropped $_droppedFrames frames",
         );
       }
-      return;
+      return false;
     }
 
     _isProcessing = true;
@@ -173,6 +214,8 @@ class PluginRuntime {
       'generationTimeMs': frame.generationTimeMs, 
       'nativeVideoId': frame.nativeVideoId,
     });
+    
+    return true;
   }
 
   void processDirectDetections(RawFrame frame, List<dynamic> detections) {
@@ -194,7 +237,6 @@ class PluginRuntime {
     final type = message['type'];
 
     if (type == 'request_inference') {
-      // stdout.writeln("PluginManager: Received request_inference");
       final requestId = message['requestId'] as int;
       final modelPath = message['modelPath'] as String;
       final transferable = message['frame'] as TransferableTypedData?;

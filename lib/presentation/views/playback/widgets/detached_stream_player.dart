@@ -136,7 +136,14 @@ class _DetachedStreamPlayerState extends State<DetachedStreamPlayer> {
                 Positioned.fill(
                   child: Container(
                     color: Colors.black,
-                    child: _buildVideoContent(),
+                    child: FittedBox(
+                      fit: BoxFit.contain,
+                      child: SizedBox(
+                        width: _currentFrameWidth.toDouble(),
+                        height: _currentFrameHeight.toDouble(),
+                        child: _buildVideoContent(),
+                      ),
+                    ),
                   ),
                 ),
 

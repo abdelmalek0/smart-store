@@ -107,7 +107,7 @@ class FilePersistence implements PersistenceRepository {
       }
     }
 
-    // 3. Extract models from Streams (Removed as models are no longer assigned to streams)
+    // 3. Extract models from Streams (Removed)
 
 
     // 4. Extract models from Plugins

@@ -106,6 +106,17 @@ class DisplayQueue {
         }
 
         if (frameToDisplay != null && !_frameStreamController.isClosed) {
+          // STRICT SYNC: Force-update the native GPU texture to match THIS frame's timestamp
+          // before we broadcast it to the UI.
+          try {
+             final tid = StreamOrchestrator.instance.getTextureManagerId(streamId);
+             if (tid != null) {
+               _bridge.showFrame(tid, frameToDisplay.decodeStartMs);
+             }
+          } catch (_) {
+            // Ignore temporary sync failures
+          }
+
           _frameStreamController.add(frameToDisplay);
           _displayCount++;
           _fpsWindowFrames++;

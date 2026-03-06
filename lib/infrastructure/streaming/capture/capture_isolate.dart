@@ -101,6 +101,13 @@ Future<void> _captureLoopAsync(IsolateInitParams params) async {
       }
     });
 
+    // STAGGERED START: Spreading out initialization for many streams (up to 20).
+    // Uses a wider jitter range to prevent 10+ streams from hitting NVDEC at once.
+    final staggerDelay = (params.videoUrl.hashCode % 20) * 150; // 0 to 2850ms jitter
+    if (staggerDelay > 0) {
+      await Future.delayed(Duration(milliseconds: staggerDelay));
+    }
+
     // Main capture loop
     while (isRunning) {
       // Reconnect if stream is not open
@@ -132,10 +139,6 @@ Future<void> _captureLoopAsync(IsolateInitParams params) async {
           lastFrameTime = now;
           frameCount++;
 
-          final timeSinceLastFrame = now - lastFrameProcessedTime;
-          lastFrameProcessedTime = now;
-
-          // Standard frame (no inference)
           final transferable = frame.data.isEmpty ? null : TransferableTypedData.fromList([frame.data]);
           params.sendPort.send([
             'frame',
@@ -149,14 +152,14 @@ Future<void> _captureLoopAsync(IsolateInitParams params) async {
           // No frame available - check watchdog
           final now = DateTime.now().millisecondsSinceEpoch;
           if (now - lastFrameTime > 5000) {
-            debugPrint("⚠️  No frames for 5s, reconnecting...");
+            // debugPrint("⚠️ CaptureIsolate [${params.sendPort.hashCode}]: No frames for 5s, reconnecting...");
             await capture.release(videoStream.streamId);
             videoStream = null;
             lastFrameTime = now;
           }
         }
       } catch (e) {
-        debugPrint("❌ Frame capture error: $e");
+        // debugPrint("❌ CaptureIsolate [${params.sendPort.hashCode}] Error: $e");
         await Future.delayed(const Duration(milliseconds: 50));
       }
 
