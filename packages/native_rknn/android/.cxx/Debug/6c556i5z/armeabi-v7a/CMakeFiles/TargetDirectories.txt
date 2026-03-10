@@ -1,3 +1,0 @@
-/home/smartprints/sandbox/smart_store_linux/packages/native_rknn/android/.cxx/Debug/6c556i5z/armeabi-v7a/CMakeFiles/native_rknn.dir
-/home/smartprints/sandbox/smart_store_linux/packages/native_rknn/android/.cxx/Debug/6c556i5z/armeabi-v7a/CMakeFiles/edit_cache.dir
-/home/smartprints/sandbox/smart_store_linux/packages/native_rknn/android/.cxx/Debug/6c556i5z/armeabi-v7a/CMakeFiles/rebuild_cache.dir
