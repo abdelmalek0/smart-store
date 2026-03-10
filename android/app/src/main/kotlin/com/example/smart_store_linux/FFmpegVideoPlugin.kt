@@ -401,7 +401,7 @@ class FFmpegStream(
         autoDisplay.set(false)
         
         // 1. Clean up (drop) all older frames and recycle their bitmaps
-        val oldKeys = frameBuffer.keys().filter { it < timestamp }
+        val oldKeys = frameBuffer.keys.filter { it < timestamp }
         if (oldKeys.isNotEmpty()) {
             android.util.Log.d("FFmpegStream", "Dropping ${oldKeys.size} old frames before $timestamp")
             for (oldKey in oldKeys) {
