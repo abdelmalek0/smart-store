@@ -399,9 +399,6 @@ TEXTURE_EXPORT int Texture_EnsureGLTexture(int texture_id) {
 }
 
 TEXTURE_EXPORT int Texture_ShowFrame(int texture_id, int64_t timestamp) {
-    if (texture_manager::TextureManager::getInstance().showFrame(texture_id, timestamp)) {
-        return 0;
-    }
     return texture_manager::TextureManager::getInstance().showFrame(texture_id, timestamp) ? 0 : -1;
 }
 
