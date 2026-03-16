@@ -54,7 +54,7 @@ class RknnInferenceBackend extends InferenceBackend {
   }
 
   @override
-  Future<List<InferenceResult>> run(
+  Future<List<BackendResult>> run(
     int modelId,
     List<InferenceInput> inputs,
   ) async {
@@ -83,7 +83,7 @@ class RknnInferenceBackend extends InferenceBackend {
       if (handle == 0) {
         debugPrint("RknnBackend: Init failed for stream $streamId");
         return [
-          InferenceResult([], metadata: {'error': 'Init failed'}),
+          BackendResult([], metadata: {'error': 'Init failed'}),
         ];
       }
 
@@ -114,7 +114,7 @@ class RknnInferenceBackend extends InferenceBackend {
 
     if (count < 0) {
       return [
-        InferenceResult([], metadata: {'error': 'Run failed'}),
+        BackendResult([], metadata: {'error': 'Run failed'}),
       ];
     }
 
@@ -134,7 +134,7 @@ class RknnInferenceBackend extends InferenceBackend {
     final resultBytes = resultFloats.buffer.asUint8List().toList();
 
     return [
-      InferenceResult([resultBytes], metadata: {'format': 'detections_f32_6'}),
+      BackendResult([resultBytes], metadata: {'format': 'detections_f32_6'}),
     ];
   }
 

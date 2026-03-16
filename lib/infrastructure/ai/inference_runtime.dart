@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:isolate';
 import 'package:flutter/foundation.dart';
 import 'package:smart_store_linux/domain/entities/inference_result.dart';
+import 'package:smart_store_linux/infrastructure/ai/backend/android/android_device.dart';
 import 'package:smart_store_linux/infrastructure/ai/worker/inference_worker.dart';
 import 'package:smart_store_linux/infrastructure/ai/worker/messages.dart';
 import 'package:smart_store_linux/infrastructure/streaming/stream_orchestrator.dart';
@@ -15,6 +16,10 @@ import 'package:smart_store_linux/infrastructure/streaming/stream_orchestrator.d
 class InferenceRuntime {
   final String modelPath;
 
+  /// Hardware device to use for Android inference.
+  /// Ignored on non-Android platforms.
+  final InferenceDevice androidDevice;
+
   // Output stream for this specific model
   final StreamController<InferenceResult> _resultStreamController =
       StreamController<InferenceResult>.broadcast();
@@ -27,7 +32,8 @@ class InferenceRuntime {
   bool _isInitialized = false;
   bool _isDisposed = false;
 
-  InferenceRuntime(this.modelPath);
+  InferenceRuntime(this.modelPath,
+      {this.androidDevice = InferenceDevice.rknn});
 
   /// Initialize the worker for this model
   Future<void> init() async {
@@ -47,7 +53,7 @@ class InferenceRuntime {
     try {
       _workerIsolate = await Isolate.spawn(
         inferenceWorkerEntry,
-        WorkerInit(receivePort.sendPort),
+        WorkerInit(receivePort.sendPort, androidDevice: androidDevice),
       );
     } catch (e) {
       debugPrint("Failed to spawn inference isolate for $modelPath: $e");

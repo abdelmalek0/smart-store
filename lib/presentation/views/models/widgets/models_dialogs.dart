@@ -18,12 +18,19 @@ import 'package:smart_store_linux/application/blocs/models/models_event.dart';
 /// Show the "Add Model" dialog. Dispatches [ModelFileAdded] to [ModelsBloc].
 void showAddModelDialog(BuildContext context) {
   String? selectedPath;
+  // Android-only: which format the user is adding (RKNN vs TFLite).
+  bool isRknn = true;
   final bloc = context.read<ModelsBloc>();
 
   showDialog(
     context: context,
     builder: (context) => StatefulBuilder(
       builder: (context, setState) {
+        final ext = isRknn ? '.rknn' : '.tflite';
+        final hint = isRknn
+            ? '/sdcard/Download/model.rknn'
+            : '/sdcard/Download/model.tflite';
+
         return AlertDialog(
           backgroundColor: AppTheme.surface,
           title: const ModernLabel(
@@ -35,10 +42,62 @@ void showAddModelDialog(BuildContext context) {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // ── Android: format selector ──────────────────────────────
+              if (Platform.isAndroid) ...[
+                const ModernLabel(
+                  'Model Format',
+                  fontSize: 13,
+                  color: Colors.white70,
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    ChoiceChip(
+                      label: const Text('RKNN'),
+                      selected: isRknn,
+                      onSelected: (_) => setState(() {
+                        isRknn = true;
+                        selectedPath = null;
+                      }),
+                      selectedColor:
+                          AppTheme.accent.withValues(alpha: 0.22),
+                      labelStyle: TextStyle(
+                        color: isRknn
+                            ? AppTheme.accent
+                            : Colors.white54,
+                        fontWeight: isRknn
+                            ? FontWeight.bold
+                            : FontWeight.normal,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    ChoiceChip(
+                      label: const Text('TFLite'),
+                      selected: !isRknn,
+                      onSelected: (_) => setState(() {
+                        isRknn = false;
+                        selectedPath = null;
+                      }),
+                      selectedColor:
+                          AppTheme.accent.withValues(alpha: 0.22),
+                      labelStyle: TextStyle(
+                        color: !isRknn
+                            ? AppTheme.accent
+                            : Colors.white54,
+                        fontWeight: !isRknn
+                            ? FontWeight.bold
+                            : FontWeight.normal,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+              ],
+              // ── File picker button ────────────────────────────────────
               ModernButton(
                 label: Platform.isAndroid
-                    ? "Pick .rknn File"
-                    : "Pick .onnx File",
+                    ? 'Pick $ext File'
+                    : 'Pick .onnx File',
                 icon: Icons.folder_open,
                 onPressed: () async {
                   if (Platform.isAndroid) {
@@ -47,8 +106,8 @@ void showAddModelDialog(BuildContext context) {
                       context: context,
                       builder: (ctx) => AlertDialog(
                         backgroundColor: AppTheme.surface,
-                        title: const ModernLabel(
-                          'Enter Model Path',
+                        title: ModernLabel(
+                          'Enter ${isRknn ? 'RKNN' : 'TFLite'} Model Path',
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
                         ),
@@ -56,17 +115,18 @@ void showAddModelDialog(BuildContext context) {
                           mainAxisSize: MainAxisSize.min,
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const ModernLabel(
-                              'Enter the full path to your .rknn file:',
+                            ModernLabel(
+                              'Enter the full path to your $ext file:',
                               fontSize: 12,
                               color: Colors.white70,
                             ),
                             const SizedBox(height: 12),
                             TextField(
                               controller: controller,
-                              decoration: const InputDecoration(
-                                hintText: '/sdcard/Download/model.rknn',
-                                hintStyle: TextStyle(color: Colors.white38),
+                              decoration: InputDecoration(
+                                hintText: hint,
+                                hintStyle:
+                                    const TextStyle(color: Colors.white38),
                               ),
                               style: const TextStyle(color: Colors.white),
                               autofocus: true,
@@ -92,11 +152,11 @@ void showAddModelDialog(BuildContext context) {
 
                     if (path != null && path.isNotEmpty) {
                       final file = File(path);
-                      if (!path.toLowerCase().endsWith('.rknn')) {
+                      if (!path.toLowerCase().endsWith(ext)) {
                         if (!context.mounted) return;
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('File must have .rknn extension'),
+                          SnackBar(
+                            content: Text('File must have $ext extension'),
                             backgroundColor: AppTheme.destructive,
                           ),
                         );
@@ -117,21 +177,23 @@ void showAddModelDialog(BuildContext context) {
                     }
                   } else {
                     try {
-                      FilePickerResult? result = await FilePicker.platform
-                          .pickFiles(
-                            type: FileType.custom,
-                            allowedExtensions: ['onnx'],
-                          );
-                      if (result != null && result.files.single.path != null) {
-                        setState(() => selectedPath = result.files.single.path);
+                      final result = await FilePicker.platform.pickFiles(
+                        type: FileType.custom,
+                        allowedExtensions: ['onnx'],
+                      );
+                      if (result != null &&
+                          result.files.single.path != null) {
+                        setState(
+                            () => selectedPath = result.files.single.path);
                       }
                     } catch (e) {
-                      debugPrint("Error picking file: $e");
+                      debugPrint('Error picking file: $e');
                     }
                   }
                 },
               ),
               const SizedBox(height: 16),
+              // ── Selected path preview ─────────────────────────────────
               if (selectedPath != null)
                 Container(
                   padding: const EdgeInsets.all(8),
@@ -143,7 +205,7 @@ void showAddModelDialog(BuildContext context) {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Text(
-                        "Selected File:",
+                        'Selected File:',
                         style: TextStyle(color: Colors.grey, fontSize: 10),
                       ),
                       const SizedBox(height: 4),
@@ -163,8 +225,8 @@ void showAddModelDialog(BuildContext context) {
           ),
           actions: [
             TextButton(
-              child: const Text("Cancel"),
               onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
             ),
             TextButton(
               onPressed: selectedPath != null
@@ -174,7 +236,7 @@ void showAddModelDialog(BuildContext context) {
                     }
                   : null,
               child: Text(
-                "Add",
+                'Add',
                 style: TextStyle(
                   color: selectedPath != null
                       ? AppTheme.accent

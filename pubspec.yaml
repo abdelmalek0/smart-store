@@ -35,6 +35,9 @@ dependencies:
   native_rknn:
     path: ./packages/native_rknn
 
+  # Android TFLite inference (CPU / GPU delegate / NNAPI delegate)
+  tflite_flutter: ^0.12.1
+
   
   file_picker: ^10.3.8
   permission_handler: ^12.0.1

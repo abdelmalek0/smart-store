@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:collection';
+import 'dart:ffi';
 import 'dart:io';
 import 'dart:isolate';
 
@@ -8,7 +9,9 @@ import 'package:smart_store_linux/infrastructure/ai/utils/constants.dart';
 import 'package:smart_store_linux/infrastructure/ai/utils/yolo_processor.dart';
 import 'package:smart_store_linux/infrastructure/ai/worker/messages.dart';
 import 'package:smart_store_linux/infrastructure/ai/backend/inference_backend.dart';
+import 'package:smart_store_linux/infrastructure/ai/backend/android/android_device.dart';
 import 'package:smart_store_linux/infrastructure/ai/backend/linux/onnx_backend.dart';
+import 'package:smart_store_linux/infrastructure/ai/backend/android/tflite_backend.dart';
 import 'package:smart_store_linux/infrastructure/ai/backend/android/rknn_backend.dart';
 
 // ============================================================================
@@ -19,7 +22,7 @@ import 'package:smart_store_linux/infrastructure/ai/backend/android/rknn_backend
 void inferenceWorkerEntry(WorkerInit init) {
   debugPrint("Worker Isolate Entry: Starting...");
   debugPrint("Worker: Started");
-  final worker = InferenceWorker(init.sendPort);
+  final worker = InferenceWorker(init.sendPort, androidDevice: init.androidDevice);
   worker.run();
 }
 
@@ -33,6 +36,9 @@ void inferenceWorkerEntry(WorkerInit init) {
 class InferenceWorker {
   final SendPort mainSendPort;
   final ReceivePort _workerReceivePort = ReceivePort();
+
+  /// The hardware device to use for inference on Android.
+  final InferenceDevice _androidDevice;
 
   late InferenceBackend _backend;
   // Map modelPath -> modelId (int)
@@ -51,7 +57,9 @@ class InferenceWorker {
   static const int queueSearchLimit = 10; // Max items to search in queue
   static const int queuePollMs = 0; // Immediate polling for minimal latency
 
-  InferenceWorker(this.mainSendPort);
+  InferenceWorker(this.mainSendPort,
+      {InferenceDevice androidDevice = InferenceDevice.rknn})
+      : _androidDevice = androidDevice;
 
   /// Run the worker - initialize and start processing
   void run() async {
@@ -60,21 +68,19 @@ class InferenceWorker {
 
     // 2. Select Backend
     if (Platform.isAndroid) {
-      _backend = RknnInferenceBackend();
-      debugPrint("Worker: Selected RKNN Backend");
+      await _selectAndroidBackend();
     } else {
       _backend = OnnxInferenceBackend();
-      debugPrint("Worker: Selected ONNX Backend");
-    }
-
-    try {
-      await _backend.init();
-      debugPrint("Worker: Backend initialized");
-      mainSendPort.send(WorkerReady(true));
-    } catch (e) {
-      debugPrint("Worker: Init Failed: $e");
-      mainSendPort.send(WorkerReady(false, e.toString()));
-      return;
+      debugPrint("Worker: Selected ONNX Backend (Linux/desktop)");
+      try {
+        await _backend.init();
+        debugPrint("Worker: Backend initialized");
+        mainSendPort.send(WorkerReady(true));
+      } catch (e) {
+        debugPrint("Worker: Init Failed: $e");
+        mainSendPort.send(WorkerReady(false, e.toString()));
+        return;
+      }
     }
 
     _workerReceivePort.listen((message) {
@@ -84,6 +90,55 @@ class InferenceWorker {
     });
 
     _startBatchLoop();
+  }
+
+  /// Selects the Android backend.
+  ///
+  /// Decision tree:
+  /// - Non-arm64 ABI (e.g. x86_64 emulator): go straight to TFLite — RKNN
+  ///   hardware does not exist and attempting it wastes time.
+  /// - arm64 + [InferenceDevice.rknn]: try RKNN NPU first, fall back to
+  ///   TFLite CPU if the NPU is unavailable (non-Rockchip SoC).
+  /// - arm64 + explicit TFLite device (cpu/gpu/nnapi): skip RKNN entirely.
+  Future<void> _selectAndroidBackend() async {
+    final isArm64 = Abi.current() == Abi.androidArm64;
+
+    if (!isArm64 || _androidDevice != InferenceDevice.rknn) {
+      // x86_64 emulator OR explicit TFLite device requested – skip RKNN.
+      final tfliteDevice =
+          _androidDevice == InferenceDevice.rknn ? InferenceDevice.gpu : _androidDevice;
+      try {
+        _backend = TfliteInferenceBackend(device: tfliteDevice);
+        await _backend.init();
+        debugPrint('Worker: TFLite backend initialised (device=$tfliteDevice)');
+        mainSendPort.send(WorkerReady(true));
+      } catch (e) {
+        debugPrint('Worker: TFLite init failed: $e');
+        mainSendPort.send(WorkerReady(false, e.toString()));
+      }
+      return;
+    }
+
+    // arm64 + rknn: try RKNN NPU first, fall back to TFLite CPU.
+    try {
+      _backend = RknnInferenceBackend();
+      await _backend.init();
+      debugPrint('Worker: RKNN NPU backend initialised – using hardware NPU');
+      mainSendPort.send(WorkerReady(true));
+      return;
+    } catch (e) {
+      debugPrint('Worker: RKNN unavailable ($e) – falling back to TFLite CPU');
+    }
+
+    try {
+      _backend = TfliteInferenceBackend(device: InferenceDevice.cpu);
+      await _backend.init();
+      debugPrint('Worker: TFLite CPU fallback backend initialised');
+      mainSendPort.send(WorkerReady(true));
+    } catch (e) {
+      debugPrint('Worker: TFLite CPU fallback init failed: $e');
+      mainSendPort.send(WorkerReady(false, e.toString()));
+    }
   }
 
   /// Start the batch processing loop
@@ -281,10 +336,15 @@ class InferenceWorker {
               result.outputs[0] is List<double>) {
             // ONNX / Float post-processing using shared YoloProcessor
             final data = result.outputs[0].cast<double>();
+
+            // TFLite exports (yolov8n.tflite etc.) output bbox coords
+            // normalized to [0,1]; ONNX exports output pixel-space [0,640].
+            final isTflite = req.modelPath.toLowerCase().endsWith('.tflite');
             final yoloDetections = YoloPostProcessor.postProcessYoloFloat(
               data: data,
               originalWidth: req.width,
               originalHeight: req.height,
+              normalizedCoords: isTflite,
             );
             // Convert Detection objects to legacy list format [x1, y1, x2, y2, score, class]
             detections = yoloDetections.map((det) {

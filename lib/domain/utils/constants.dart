@@ -40,10 +40,10 @@ class Constants {
   /// Processed frames older than this (measured from their generation time)
   /// are considered stale and discarded by [DisplayQueue].
   ///
-  /// Rationale: inference at ~8 fps = 125ms/frame. Allowing 500ms means at
-  /// most 4 inference cycles of buffering before we drop — keeps the display
-  /// real-time while absorbing short inference spikes.
-  static const int maxDisplayLatencyMs = 500;
+  /// Rationale: CPU-only TFLite on an emulator runs at ~1–2 fps (500–1000 ms
+  /// per frame). 5 000 ms allows several inference cycles of buffering on slow
+  /// devices while still dropping truly stale frames.
+  static const int maxDisplayLatencyMs = 5000;
 
   // ============================================================================
   // PERFORMANCE TUNING

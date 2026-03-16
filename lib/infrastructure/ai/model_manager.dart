@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:developer';
 import 'dart:typed_data';
+import 'package:smart_store_linux/infrastructure/ai/backend/android/android_device.dart';
 import 'package:smart_store_linux/infrastructure/ai/registry/model_registry.dart';
 import 'package:smart_store_linux/infrastructure/ai/inference_runtime.dart';
 import 'package:smart_store_linux/domain/entities/inference_result.dart';
@@ -23,6 +24,23 @@ class ModelManager {
 
   Map<String, ModelConfig> _models = {};
 
+  /// Fallback Android inference device used when the model format cannot be
+  /// determined from the file extension. Defaults to [InferenceDevice.rknn].
+  InferenceDevice androidDevice = InferenceDevice.rknn;
+
+  /// Infer the appropriate [InferenceDevice] from the model file extension.
+  ///
+  /// - `.tflite` → [InferenceDevice.gpu]
+  ///   The TFLite backend will try: GPU delegate → XNNPack → bare CPU
+  ///   automatically, so requesting `gpu` is safe on all devices including
+  ///   emulators (delegates that are unavailable are caught and skipped).
+  /// - anything else (`.rknn`, `.onnx`, …) → [InferenceDevice.rknn]
+  ///   (RKNN NPU with automatic TFLite CPU fallback on non-Rockchip devices)
+  InferenceDevice _deviceForPath(String path) {
+    if (path.toLowerCase().endsWith('.tflite')) return InferenceDevice.gpu;
+    return InferenceDevice.rknn;
+  }
+
   void initialize(List<ModelConfig> configs) {
     _models = {for (var m in configs) m.id: m};
   }
@@ -37,14 +55,16 @@ class ModelManager {
     required Uint8List imageBytes,
     required int width,
     required int height,
+    InferenceDevice? device,
   }) async {
     // 1. Get or Create Runtime
     InferenceRuntime? runtime = InferenceRegistry.instance.getRuntime(modelPath);
 
     if (runtime == null) {
+      final selectedDevice = device ?? _deviceForPath(modelPath);
       try {
-        log('[ModelManager] Initializing runtime for $modelPath');
-        runtime = InferenceRuntime(modelPath);
+        log('[ModelManager] Initializing runtime for $modelPath (device=$selectedDevice)');
+        runtime = InferenceRuntime(modelPath, androidDevice: selectedDevice);
 
         // Pipe results to global stream
         runtime.resultsStream.listen((result) {

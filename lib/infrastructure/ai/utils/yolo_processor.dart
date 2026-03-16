@@ -65,6 +65,10 @@ class YoloPostProcessor {
     required int originalHeight,
     double confidenceThreshold = AiConstants.confidenceThreshold,
     double nmsThreshold = AiConstants.nmsIouThreshold,
+    /// Set to true when the model outputs normalized coordinates in [0,1]
+    /// (typical of TFLite exports). Set to false for ONNX exports that
+    /// output coordinates directly in model-input pixel space [0, inputSize].
+    bool normalizedCoords = false,
   }) {
     final int numAnchors = AiConstants.yolov8NumAnchors; // 8400
     // Dynamic calculation: data.length = (4 + numClasses) * numAnchors
@@ -91,11 +95,14 @@ class YoloPostProcessor {
 
     // Process each anchor point
     for (int i = 0; i < numAnchors; i++) {
-      // Extract bbox coordinates (model space: 0-640)
-      final double cx = data[i]; // x center
-      final double cy = data[numAnchors + i]; // y center
-      final double w = data[2 * numAnchors + i]; // width
-      final double h = data[3 * numAnchors + i]; // height
+      // Extract bbox coordinates.
+      // ONNX exports: already in model-input pixel space [0, inputSize].
+      // TFLite exports: normalized to [0, 1] → multiply by inputSize to denorm.
+      final double coordMul = normalizedCoords ? inputSize.toDouble() : 1.0;
+      final double cx = data[i] * coordMul; // x center
+      final double cy = data[numAnchors + i] * coordMul; // y center
+      final double w = data[2 * numAnchors + i] * coordMul; // width
+      final double h = data[3 * numAnchors + i] * coordMul; // height
 
       // Find the class with maximum probability
       double maxProb = 0.0;

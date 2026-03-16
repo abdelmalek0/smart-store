@@ -21,7 +21,7 @@ class ModelsScreen extends StatelessWidget {
           children: [
             ModernHeader(
               title: "Models",
-              subtitle: "Manage ONNX models",
+              subtitle: "Manage inference models",
               actions: [
                 ModernButton(
                   label: "Add Model",
@@ -92,6 +92,8 @@ class ModelsScreen extends StatelessWidget {
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
+                        const SizedBox(width: 8),
+                        _buildFormatBadge(model.path),
                         if (model.labels.isNotEmpty) ...[
                           const SizedBox(width: 8),
                           _buildLabelsBadge(model.labels.length),
@@ -136,6 +138,39 @@ class ModelsScreen extends StatelessWidget {
             ],
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildFormatBadge(String path) {
+    final lower = path.toLowerCase();
+    final String label;
+    final Color color;
+    if (lower.endsWith('.tflite')) {
+      label = 'TFLite';
+      color = const Color(0xFFF59E0B); // amber
+    } else if (lower.endsWith('.rknn')) {
+      label = 'RKNN';
+      color = const Color(0xFF818CF8); // indigo
+    } else {
+      label = 'ONNX';
+      color = const Color(0xFF34D399); // teal
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: color.withValues(alpha: 0.4)),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: color,
+          fontSize: 10,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.5,
+        ),
       ),
     );
   }

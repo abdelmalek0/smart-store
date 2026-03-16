@@ -5,14 +5,14 @@ enum ModelType { classifier, yolo }
 
 /// Standardized output for inference
 /// Wraps the raw results which might differ by platform/model
-class InferenceResult {
+class BackendResult {
   /// Raw output buffers (e.g. `List<float>` or `List<int>`)
   final List<List<dynamic>> outputs;
 
   /// Metadata helpful for post-processing (e.g. quantization params for RKNN)
   final Map<String, dynamic> metadata;
 
-  InferenceResult(this.outputs, {this.metadata = const {}});
+  BackendResult(this.outputs, {this.metadata = const {}});
 }
 
 /// Input for inference
@@ -48,7 +48,7 @@ abstract class InferenceBackend {
   /// [modelId] is the handle returned by loadModel
   /// [inputs] is a list of inputs (batch size 1 or more)
   /// Returns a list of results corresponding to inputs
-  Future<List<InferenceResult>> run(int modelId, List<InferenceInput> inputs);
+  Future<List<BackendResult>> run(int modelId, List<InferenceInput> inputs);
 
   /// Unload a model
   void unloadModel(int modelId);

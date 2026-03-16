@@ -1,5 +1,7 @@
 import 'dart:isolate';
 
+import 'package:smart_store_linux/infrastructure/ai/backend/android/android_device.dart';
+
 // ============================================================================
 // MESSAGE CLASSES - Communication between main isolate and worker isolate
 // ============================================================================
@@ -7,7 +9,11 @@ import 'dart:isolate';
 /// Worker initialization message
 class WorkerInit {
   final SendPort sendPort;
-  WorkerInit(this.sendPort);
+
+  /// Device to use for Android inference (ignored on other platforms).
+  final InferenceDevice androidDevice;
+
+  WorkerInit(this.sendPort, {this.androidDevice = InferenceDevice.rknn});
 }
 
 /// Worker ready signal

@@ -67,10 +67,12 @@ void pluginWorkerEntry(Map<String, dynamic> args) {
           final width = message['width'] as int;
           final height = message['height'] as int;
           final timestamp = message['timestamp'] as int;
+          final generationTimeMs = message['generationTimeMs'] as int? ?? 0;
           final bytes = transferable?.materialize().asUint8List() ?? Uint8List(0);
           final nativeVideoId = message['nativeVideoId'] as int?;
 
-          final frame = RawFrame(bytes, width, height, timestamp, nativeVideoId: nativeVideoId);
+          final frame = RawFrame(bytes, width, height, timestamp,
+              generationTimeMs: generationTimeMs, nativeVideoId: nativeVideoId);
           await plugin.processFrame(frame);
         } else if (type == 'frame_with_detections') {
           framesProcessed++;
@@ -182,12 +184,9 @@ class PluginRuntime {
 
   bool _isProcessing = false;
   int _droppedFrames = 0;
-  int _totalReceived = 0;
 
   bool processFrame(RawFrame frame) {
     if (_isolateSendPort == null) return false;
-
-    _totalReceived++;
 
     // Leaky Bucket: Drop frame if previous one is still processing
     // This ensures we always process the freshest frame and don't build up a queue

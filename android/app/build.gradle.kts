@@ -24,7 +24,9 @@ android {
         versionName = flutter.versionName
 
         ndk {
-            abiFilters += listOf("arm64-v8a")
+            // arm64-v8a  = physical devices (RK3588, Pixel, etc.)
+            // x86_64     = Android emulator on x86_64 host
+            abiFilters += listOf("arm64-v8a", "x86_64")
         }
     }
 
@@ -74,8 +76,12 @@ android {
 
 dependencies {
     implementation("org.bytedeco:javacv:1.5.8")
-    implementation("org.bytedeco:ffmpeg:5.1.2-1.5.8:android-arm64") 
+    // arm64-v8a  – physical ARM devices
+    implementation("org.bytedeco:ffmpeg:5.1.2-1.5.8:android-arm64")
     add("javacpp", "org.bytedeco:ffmpeg:5.1.2-1.5.8:android-arm64")
+    // x86_64     – Android emulator
+    implementation("org.bytedeco:ffmpeg:5.1.2-1.5.8:android-x86_64")
+    add("javacpp", "org.bytedeco:ffmpeg:5.1.2-1.5.8:android-x86_64")
 }
 
 // ================= JAVACPP EXTRACT =================
@@ -83,15 +89,27 @@ dependencies {
 val javacppExtract by tasks.registering(Copy::class) {
     dependsOn(configurations.getByName("javacpp"))
     from(configurations.getByName("javacpp").map { zipTree(it) })
-    include("lib/android-arm64/**")
+    // Extract both ABI variants from the javacpp jars
+    include("lib/android-arm64/**", "lib/android-x86_64/**")
     includeEmptyDirs = false
 
     eachFile {
-        path = name 
+        // Remap  lib/android-arm64/libfoo.so  →  arm64-v8a/libfoo.so
+        //        lib/android-x86_64/libfoo.so →  x86_64/libfoo.so
+        val parts = relativePath.segments
+        if (parts.size >= 2) {
+            val abi = when (parts[1]) {
+                "android-arm64"  -> "arm64-v8a"
+                "android-x86_64" -> "x86_64"
+                else             -> parts[1]
+            }
+            path = "$abi/${parts.last()}"
+        } else {
+            path = name
+        }
     }
 
-    // Fixed: Replaced deprecated $buildDir with layout.buildDirectory
-    into(layout.buildDirectory.dir("javacpp/jniLibs/arm64-v8a"))
+    into(layout.buildDirectory.dir("javacpp/jniLibs"))
 }
 
 tasks.named("preBuild") {

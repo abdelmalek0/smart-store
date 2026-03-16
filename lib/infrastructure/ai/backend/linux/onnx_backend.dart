@@ -35,7 +35,7 @@ class OnnxInferenceBackend implements InferenceBackend {
   }
 
   @override
-  Future<List<InferenceResult>> run(
+  Future<List<BackendResult>> run(
     int modelId,
     List<InferenceInput> inputs,
   ) async {
@@ -84,7 +84,7 @@ class OnnxInferenceBackend implements InferenceBackend {
 
             if (outputs.containsKey('output0')) {
               final flatData = (outputs['output0']![0] as List).cast<double>();
-              return [InferenceResult([flatData])];
+              return [BackendResult([flatData])];
             }
           }
         } finally {
@@ -119,14 +119,14 @@ class OnnxInferenceBackend implements InferenceBackend {
       final results = session.run(runOptions, inputsMap);
 
       if (results.isEmpty) {
-        return List.generate(batchSize, (_) => InferenceResult([]));
+        return List.generate(batchSize, (_) => BackendResult([]));
       }
 
       // 3. Parse Results
       final dynamic firstOutput = results[0]; // [data, shape]
       final List<double> flatData = (firstOutput[0] as List).cast<double>();
 
-      final outputResults = <InferenceResult>[];
+      final outputResults = <BackendResult>[];
       final perImageSize = flatData.length ~/ batchSize;
 
       for (int i = 0; i < batchSize; i++) {
@@ -134,7 +134,7 @@ class OnnxInferenceBackend implements InferenceBackend {
         final end = start + perImageSize;
         final sublist = flatData.sublist(start, end);
 
-        outputResults.add(InferenceResult([sublist]));
+        outputResults.add(BackendResult([sublist]));
       }
 
       return outputResults;
