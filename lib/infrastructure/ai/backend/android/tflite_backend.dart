@@ -71,14 +71,24 @@ class TfliteInferenceBackend implements InferenceBackend {
   Future<int> loadModel(String modelPath, ModelType type) async {
     if (!_initialized) await init();
 
-    final options = _buildInterpreterOptions();
+    Future<Interpreter> _createInterpreter(InterpreterOptions opts) async {
+      return Interpreter.fromFile(File(modelPath), options: opts);
+    }
 
     late final Interpreter interpreter;
-    if (modelPath.startsWith('assets/')) {
-      final assetRelPath = modelPath.substring('assets/'.length);
-      interpreter = await Interpreter.fromAsset(assetRelPath, options: options);
-    } else {
-      interpreter = Interpreter.fromFile(File(modelPath), options: options);
+    try {
+      interpreter = await _createInterpreter(_buildInterpreterOptions());
+    } catch (e) {
+      // GpuDelegateV2 / XNNPack attach without throwing but can still cause
+      // interpreter creation to fail on emulators or unsupported devices.
+      // Retry with bare multi-threaded CPU so the app stays functional.
+      debugPrint(
+        'TfliteBackend: interpreter creation failed (device=$device) – '
+        'retrying with CPU ($e)',
+      );
+      interpreter = await _createInterpreter(
+        InterpreterOptions()..threads = 4,
+      );
     }
 
     // Pin the input shape once – prevents the PAD op from seeing a 1-D tensor
