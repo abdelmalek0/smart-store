@@ -7,6 +7,11 @@ abstract class PlaybackEvent extends Equatable {
   List<Object?> get props => [];
 }
 
+/// Dispatched on bloc creation to load streams and keep them in sync.
+class PlaybackStreamsLoaded extends PlaybackEvent {
+  const PlaybackStreamsLoaded();
+}
+
 class PlaybackStreamSelected extends PlaybackEvent {
   final String streamId;
 

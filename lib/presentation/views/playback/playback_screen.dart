@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:smart_store_linux/domain/repositories/i_config_repository.dart';
 import 'package:smart_store_linux/application/di/injection_container.dart';
 import 'package:smart_store_linux/application/blocs/playback/playback_bloc.dart';
 import 'package:smart_store_linux/application/blocs/playback/playback_event.dart';
@@ -27,36 +26,36 @@ class _PlaybackContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final streams = sl<IConfigRepository>().currentConfig.streams;
-
-    if (streams.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.videocam_off, size: 60, color: AppTheme.text),
-            const SizedBox(height: 16),
-            ModernLabel(
-              "No streams available.",
-              color: AppTheme.text.withValues(alpha: 0.5),
-              fontSize: 18,
-            ),
-          ],
-        ),
-      );
-    }
-
-    // Auto-select first stream if none selected
-    if (streams.isNotEmpty) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        context.read<PlaybackBloc>().add(
-          PlaybackFirstAutoSelected(streams.first.id),
-        );
-      });
-    }
-
     return BlocBuilder<PlaybackBloc, PlaybackState>(
       builder: (context, state) {
+        final streams = state.streams;
+
+        if (streams.isEmpty) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.videocam_off, size: 60, color: AppTheme.text),
+                const SizedBox(height: 16),
+                ModernLabel(
+                  "No streams available.",
+                  color: AppTheme.text.withValues(alpha: 0.5),
+                  fontSize: 18,
+                ),
+              ],
+            ),
+          );
+        }
+
+        // Auto-select first stream if none selected.
+        if (state.selectedStreamId == null) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            context.read<PlaybackBloc>().add(
+              PlaybackFirstAutoSelected(streams.first.id),
+            );
+          });
+        }
+
         final selectedId = state.selectedStreamId ?? streams.first.id;
         final selectedStream = streams.firstWhere(
           (s) => s.id == selectedId,

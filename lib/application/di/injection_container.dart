@@ -117,5 +117,5 @@ void configureDependencies(IConfigRepository repo) {
     () => EventsLogBloc(eventService: sl<EventBusImpl>()),
   );
 
-  sl.registerFactory<PlaybackBloc>(() => PlaybackBloc());
+  sl.registerFactory<PlaybackBloc>(() => PlaybackBloc(repo: repo));
 }
